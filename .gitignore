@@ -2,3 +2,4 @@
 *.pt
 ./data/keypoints/
 ./data/__pycache__/
+yolo_bad_frames.txt
