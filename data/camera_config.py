@@ -1,0 +1,1 @@
+CAMERA_PATH = './data/virtual_cameras/'

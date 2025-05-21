@@ -1,0 +1,32 @@
+<?xml version="1.0" ?>
+<opencv_storage>
+  <image_width>1280</image_width>
+  <image_height>720</image_height>
+  <Intrinsics type_id="opencv-matrix">
+    <rows>3</rows>
+    <cols>3</cols>
+    <data>
+527.13336182 0.00000000 625.83691406
+0.00000000 527.13336182 369.58691406
+0.00000000 0.00000000 1.00000000
+</data>
+  </Intrinsics>
+  <CameraMatrix type_id="opencv-matrix">
+    <rows>3</rows>
+    <cols>4</cols>
+    <data>
+0.7424394224188988 -0.3328725031536164 0.5813601299388681 3.9800000000000000
+0.6699132063471297 0.3689099821275122 -0.6442994032655832 -3.6800000000000002
+0.0000000000000000 0.8678141055150720 0.4968889999477505 3.0000000000000000
+</data>
+  </CameraMatrix>
+  <Position type_id="opencv-matrix">
+    <rows>3</rows>
+    <cols>1</cols>
+    <data>
+3.9800000000000000
+-3.6800000000000002
+3.0000000000000000
+</data>
+  </Position>
+</opencv_storage>

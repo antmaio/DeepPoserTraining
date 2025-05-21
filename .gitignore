@@ -1,0 +1,4 @@
+# YOLOv8 model weights
+*.pt
+./data/keypoints/
+./data/__pycache__/
