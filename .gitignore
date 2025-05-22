@@ -1,5 +1,7 @@
 # YOLOv8 model weights
 *.pt
-./data/keypoints/
-./data/__pycache__/
+*.pkl
+*.pyc
+data/keypoints/
+data/__pycache__/
 yolo_bad_frames.txt

@@ -1,32 +1,25 @@
 # OpenMPLPoser
 
-> A brief description or tagline for your project.
+> Deep Learning-based framework for self-avatar animation from 18DoF sparse inputs extended with multiview 2D pose estimation.
 
 ## Table of Contents
-
-- [Overview](#overview)
 - [Installation](#installation)
 - [Usage](#usage)
 - [License](#license)
 - [Acknowledgements](#acknowledgements)
 
-## Overview
-
-Deep Learning-based framework for self-avatar animation from 18DoF sparse inputs extended with multiview 2D pose estimation.
-
 ## Installation
 1. Download desired subset of AMASS dataset from https://amass.is.tue.mpg.de/download.php. These folders must be placed into ```ROOT_DIR```
 2. Download body models from https://smpl-x.is.tue.mpg.de/download.php. The folders must be placed into ```SUPPORT_DIR```
-3. Download data split file.
-4. Clone the repository
+3. Clone the repository
 git clone https://github.com/your-username/your-project.git
 cd your-project
-5. Set up virtual environment (optional)
+4. Set up virtual environment (optional)
 ```bash
 conda create -n YOURENV python=3.9
 conda activate YOURENV
 ```
-6. Install the required environment. Tested on Python 3.9, Pytorch 2.3.1
+5. Install the required environment. Tested on Python 3.9, Pytorch 2.3.1
 ```bash
 conda install pytorch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 pytorch-cuda=11.8 -c pytorch -c nvidia
 pip install scikit-learn==1.5.0
