@@ -36,6 +36,16 @@ conda env create -f environment.yml
 ```bash
 python -m data.prepare_data --root ROOT_DIR --protocol PROTOCOL --support_data SUPPORT_DIR --yolo_model YOLO_MODEL --data_split DATA_SPLIT_DIR
 ```
+Then, to get 3d keypoints based on multiview 2d pose estimation, 
+ ```bash
+python -m data.pose-lifter.triang --dataset_type DATASET_TYPE --dataroot KEYPOINTS_DIR
+```
+Example:
+```bash
+python -m data.pose-lifter.triang --dataset_type amass_p1 --dataroot ./data/keypoints/yolov8n-pose_protocol_1
+```
+KEYPOINTS_DIR is the directory of pickle files built from ```data.prepare_data```
+ 
 ## License 
 
 ## Acknowledgments
