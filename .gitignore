@@ -2,6 +2,8 @@
 *.pt
 *.pkl
 *.pyc
+*.npz
 data/keypoints/
 data/__pycache__/
+pose_lifter/animate.py
 yolo_bad_frames.txt
