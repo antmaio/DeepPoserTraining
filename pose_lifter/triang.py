@@ -8,15 +8,160 @@ from typing import List, Tuple
 import os
 import numpy as np
 import cv2
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+import pyrender
+from pyrender import Viewer
+import copy
 #Internal
 from data.camera_config import CAMERA_PATH
 from data.yolo_data_gen import extract_from_xml
+from body_visualizer.mesh.mesh_viewer import MeshViewer
+from body_visualizer.tools.vis_tools import colors
 
+class MeshViewer2(MeshViewer):
+
+    def __init__(self, width=1200, height=800, intrinsic=np.array([[1, 0, 0], [0, 1, 0]]), use_offscreen=True):
+        # super().__init__()
+
+        self.width, self.height = width, height
+        self.use_offscreen = use_offscreen
+        self.render_wireframe = False
+
+        self.mat_constructor = pyrender.MetallicRoughnessMaterial
+        self.trimesh_to_pymesh = pyrender.Mesh.from_trimesh
+
+        self.scene = pyrender.Scene(bg_color=colors['white'], ambient_light=(0.3, 0.3, 0.3))
+
+        # pc = pyrender.PerspectiveCamera(yfov=np.pi / 3.0, aspectRatio=float(width) / height)
+        K = intrinsic
+        pc = pyrender.IntrinsicsCamera(intrinsic[0, 0], intrinsic[1, 1], intrinsic[0, 2], intrinsic[1, 2])
+        camera_pose = np.eye(4)
+        camera_pose[:3, 3] = np.array([0, 0, 3.0])
+        self.camera_node = self.scene.add(pc, pose=camera_pose, name='pc-camera')
+
+        self.figsize = (width, height)
+
+        if self.use_offscreen:
+            self.viewer = pyrender.OffscreenRenderer(*self.figsize)
+            self.use_raymond_lighting(4.)
+        else:
+            self.viewer = Viewer(self.scene, use_raymond_lighting=True, viewport_size=self.figsize, cull_faces=False,
+                                 run_in_thread=True)
+
+    def updateCam(self, camera_pose, intrinsic):
+        self.camera_node.camera.fx = intrinsic[0, 0]
+        self.camera_node.camera.fy = intrinsic[1, 1]
+        self.camera_node.camera.cx = intrinsic[0, 2]
+        self.camera_node.camera.cy = intrinsic[1, 2]
+        self.scene.set_pose(self.camera_node, pose=camera_pose)
+
+    def get_camera(self):
+        return self.camera_node.camera
+
+    def get_projection_matrix(self):
+        return self.camera_node.camera.get_projection_matrix(width=self.width, height=self.height)
+
+    def remove_mesh(self):
+        for node in self.scene.get_nodes():
+            if node.name is not None and 'mesh' in node.name:
+                self.scene.remove_node(node)
+
+
+def animate_2d_keypoints(yolo_keypoints: dict, 
+                        cam_keys_for_triang: List[str], 
+                        output_dir: str = "./",
+                        fps: int = 60,
+                        point_size: int = 30,
+                        point_color: str = 'red'):
+    """
+    Save scatter-only animations of 2D keypoints as AVI files
+    
+    Args:
+        yolo_keypoints: Dictionary with camera keys and keypoints (nframes, njoints, 2)
+        cam_keys_for_triang: List of camera keys to process
+        output_dir: Directory to save AVI files
+        fps: Frames per second for output video
+        point_size: Size of scatter points
+        point_color: Color of scatter points
+    """
+    
+    for cam_key in cam_keys_for_triang:
+        if cam_key not in yolo_keypoints:
+            continue
+            
+        points2d = yolo_keypoints[cam_key].cpu().numpy()
+        nframes, njoints, _ = points2d.shape
+        
+        # Create figure with dark background
+        fig, ax = plt.subplots(figsize=(10, 8))
+        fig.patch.set_facecolor('black')
+        ax.set_facecolor('black')
+        ax.set_title(f'Camera: {cam_key}', color='white')
+        
+        # Set bounds with padding
+        x_min, x_max = np.min(points2d[..., 0]), np.max(points2d[..., 0])
+        y_min, y_max = np.min(points2d[..., 1]), np.max(points2d[..., 1])
+        padding = max((x_max - x_min) * 0.1, (y_max - y_min) * 0.1, 50)
+        ax.set_xlim(x_min - padding, x_max + padding)
+        ax.set_ylim(y_min - padding, y_max + padding)
+        ax.invert_yaxis()  # Match image coordinates
+        
+        # Clean up axes
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        
+        # Initialize scatter plot
+        scatter = ax.scatter([], [], c=point_color, s=point_size, alpha=0.8)
+        
+        # Animation update function
+        def update(frame):
+            points = points2d[frame]
+            scatter.set_offsets(points)
+            return [scatter]
+        
+        # Create animation
+        anim = FuncAnimation(
+            fig,
+            update,
+            frames=nframes,
+            interval=1000/fps,  # Convert fps to interval
+            blit=True
+        )
+        
+        # Save as AVI file
+        output_path = f"{output_dir}/{cam_key}_2d_keypoints.avi"
+        
+        # Using 'ffmpeg' writer with AVI-specific codec
+        writer = 'ffmpeg'
+        codec = 'mpeg4'  # Common AVI codec
+        anim.save(output_path,
+                 writer=writer,
+                 codec=codec,
+                 fps=fps,
+                 dpi=100,
+                 bitrate=2000,
+                 extra_args=['-vcodec', codec])
+        
+        print(f"Saved AVI animation for {cam_key} to {output_path}")
+        
+        # Clean up
+        plt.close(fig)
+
+        # Example usage:
+        # animate_2d_keypoints(yolo_keypoints, 
+        #                     ['cam1', 'cam2'], 
+        #                     output_dir='animations',
+        #                     fps=30,
+        #                     point_size=40,
+        #                     point_color='cyan')
 def triangulate(
     Ks:np.ndarray, 
     camera_poses:np.ndarray, 
     image_sizes:List[Tuple[int, int]], 
-    yolo_keypoints:torch.Tensor, 
+    yolo_keypoints:dict, 
     cam_keys_for_triang:List[str],
     frame_id:int,
     joint_id:int
@@ -55,17 +200,18 @@ def triangulate(
     - Uses OpenCV's triangulatePoints function
     """
 
+    """ Method 1 """
+    '''
     proj_matrices, points2d = [], []
 
     for cam_id, cam_key in enumerate(cam_keys_for_triang):
         image_width, image_height = image_sizes[cam_id]
-        Ks[cam_id], camera_poses[cam_id], yolo_keypoints[cam_key]
         point2d = yolo_keypoints[cam_key][frame_id, joint_id].cpu().numpy()
         point2d_normalized = np.array([
             point2d[0] / image_width,
             point2d[1] / image_height
         ], dtype=np.float32)
-        points2d.append(point2d_normalized)  # <-- FIX: Append to points2d
+        points2d.append(point2d_normalized)
 
         #Get projection matrix (K @ [R|t])
         K = Ks[cam_id]
@@ -80,10 +226,41 @@ def triangulate(
         proj_matrices[0], proj_matrices[1],
         points2d[:, 0:1], points2d[:, 1:2]
     )
-    
-    #from homogeneous to 3D
-    return (points3d_hom[:3] / points3d_hom[3]).flatten()
 
+    points3d = points3d_hom[:3] / points3d_hom[3].flatten()
+    '''
+    proj_matrices, points2d = [], []
+    KMats, proj_matrices = [], []
+
+    for cam_id, cam_key in enumerate(cam_keys_for_triang):
+        image_width, image_height = image_sizes[cam_id]
+        point2d = yolo_keypoints[cam_key][frame_id, joint_id].cpu().numpy()
+        points2d.append(point2d)
+
+        #get camera parameters
+        mv = MeshViewer2(width=image_width, height=image_height, intrinsic=Ks[cam_id], use_offscreen=True)
+        camera_pose = camera_poses[cam_id]  
+        mv.updateCam(camera_pose, Ks[cam_id])
+
+        KMats.append(mv.viewer._renderer._get_camera_matrices(mv.scene))
+        proj_matrices.append(mv.get_camera().get_projection_matrix(image_width, image_height))
+        #from homogeneous to 3D
+
+    mat0, mat1 = (KMats[0][1] @ KMats[0][0])[:3,:], (KMats[1][1] @ KMats[1][0])[:3,:]
+    #pmat0, pmat1 = proj_matrices[0][:3], proj_matrices[1][:3]
+
+    kp0, kp1 = np.transpose(copy.copy(points2d[0])), np.transpose(copy.copy(points2d[1]))
+    # keypoints at cam 0
+    kp0[0] = (kp0[0] - (image_width/2)) / (image_width/2)
+    kp0[1] = ((image_height / 2) - kp0[1]) / (image_height/2)
+    # keypoints at cam 1
+    kp1[0] = (kp1[0] - (image_width/2)) / (image_width/2)
+    kp1[1] = ((image_height / 2) - kp1[1]) / (image_height/2)
+
+    #triangulation
+    points3d = cv2.triangulatePoints(mat0,mat1,kp0,kp1)
+    points3d = points3d[:3] / points3d[3] #homogeneous to heterogeneous
+    return points3d.squeeze()
 
 def get_cam_params_from_key(key: List[str], camera_files:List[str])->Tuple[List[np.ndarray], List[np.ndarray]]:
     """
@@ -181,6 +358,7 @@ def __main():
                 data = pickle.load(f)
         
         yolo_keypoints = data['yolo_keypoints'] 
+
         confidences = yolo_keypoints['confidences']
         nframes, njoints, _ = confidences.shape
                 
@@ -193,6 +371,8 @@ def __main():
         for f in range(nframes):
             for j in range(njoints):
                 cam_keys_for_triang = [f'vcam{k}' for k in cams_max_conf[f,j]]
+                #animate_2d_keypoints(yolo_keypoints, cam_keys_for_triang, output_dir='./')
+
                 Ks, camera_poses, image_sizes = get_cam_params_from_key(cam_keys_for_triang, camera_files)
         
                 #Get 3D world positions from 2D yolo keypoints 

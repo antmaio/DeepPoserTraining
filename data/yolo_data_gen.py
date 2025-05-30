@@ -6,7 +6,6 @@ import os
 import numpy as np
 import trimesh
 import ultralytics
-
 #Internal
 from body_visualizer.tools.vis_tools import colors
 from human_body_prior.tools.omni_tools import copy2cpu as c2c

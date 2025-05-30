@@ -3,6 +3,8 @@
 *.pkl
 *.pyc
 *.npz
+*.avi
+*.png
 data/keypoints/
 data/__pycache__/
 pose_lifter/animate.py
