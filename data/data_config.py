@@ -1,3 +1,4 @@
+#External
 import enum
 
 OUTPUT_DIR  = "./data/keypoints/"

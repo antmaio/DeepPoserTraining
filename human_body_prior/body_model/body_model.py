@@ -53,7 +53,6 @@ class BodyModel(nn.Module):
 
         self.dtype = dtype
 
-
         # -- Load SMPL params --
         if bm_fname.endswith('.npz'):
             smpl_dict = np.load(bm_fname, encoding='latin1')

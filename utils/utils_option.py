@@ -4,7 +4,21 @@ from datetime import datetime
 import json
 import re
 import glob
+import time
 
+
+def generate_time_str() -> str:
+    """
+    Generates a string describing current local time
+    """
+    time_now = time.localtime()
+    day = time_now.tm_mday
+    month = time_now.tm_mon
+    year = str(time_now.tm_year)[-2:]
+    hour = time_now.tm_hour
+    minute = time_now.tm_min
+    sec = time_now.tm_sec
+    return '{}-{}-{}-{}-{}-{}'.format(year, month, day, hour, minute, sec)
 
 '''
 # --------------------------------------------

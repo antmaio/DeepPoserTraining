@@ -13,11 +13,12 @@ from data.rendering import CheckerBoard,MeshViewer2
 from data.data_config import YoloJoints
 from data.camera_config import CAMERA_PATH
 from human_body_prior.body_model.body_model import BodyModel
+from data.utils_yolo import visualize_yolo_results
 
 import os
 os.environ['PYOPENGL_PLATFORM'] = 'egl'
 
-
+'''
 """ Projection """
 def to_homogeneous(points_world):
     """
@@ -87,6 +88,7 @@ def projection(data3d, ex_params, intr_params):
     data3d_cam = world_to_cam(data3d, ex_params)
     data2d = cam_to_image(data3d_cam, intr_params)
     return data2d
+'''
 
 """ Rendering """
 def generate_checker_mesh():
@@ -171,8 +173,6 @@ def generate_new_scene_pov(mv, K):
     
     mv.updateCam(pov_pose, K)
     return mv
-
-
     
 def extract_from_xml(file_path):
     # Parse the XML file using ElementTree and get the root element
@@ -288,11 +288,11 @@ def run_yolo(
 
     # Image resolution
     Confidences, cam_2d = [], []
-    print('Processing YOLO ...')
+    print(f'Processing {nb_frames} frames ...')
 
     for frameId in range(nb_frames + 1):
 
-        print(f'\r{frameId}/{nb_frames}', end='')
+        #print(f'\r{frameId}/{nb_frames}', end='')
 
         frame_path_id = f"{frame_path}/{idx}.pkl"
 
@@ -316,7 +316,7 @@ def run_yolo(
             # Extract 2D coordinates (x,y) and store
             cam_2d[cam_idx].append(keyPoints[cam_idx][0][:, 0:2])
 
-    print('\n')
+    #print('\n')
 
     Confidences = np.array(Confidences).squeeze()
     Confidences = np.transpose(Confidences, (0, 2, 1))

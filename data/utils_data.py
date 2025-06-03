@@ -16,6 +16,7 @@ from data.yolo_data_gen import run_yolo
 from data.rendering import init_mesh_viewer
 from data.data_config import SMPL_JOINTS
 
+
 DISCARD_TERRAIN_SEQUENCES = True # throw away sequences where the person steps onto objects (determined by a heuristic)
 DISCARD_SHORTER_THAN = 1.0 # seconds
 
@@ -184,7 +185,7 @@ def syn_acc(v, smooth_n=4):
              for i in range(0, v.shape[0] - smooth_n * 2)])
     return acc
 
-def process(src, dst, body_models, split_file=None, yolo_model=None):
+def process(src, dst, body_models, split_file=None, yolo_model=None, logging):
     assert src and dst
     
     rotation_local_full_gt_list = []
@@ -200,6 +201,13 @@ def process(src, dst, body_models, split_file=None, yolo_model=None):
 
     idx = 0
     for filepath in all_file:
+    
+        if os.path.exists(os.path.join(dst, f'{idx+1}.pkl')):
+            idx += 1
+            logging.info(f'File {os.path.join(dst, f"{idx}.pkl")} exists')
+            continue
+
+
         #Init dict
         data = dict()
         data['yolo_keypoints'] = dict()
@@ -208,7 +216,7 @@ def process(src, dst, body_models, split_file=None, yolo_model=None):
         try:
             framerate = bdata["mocap_framerate"]
         except:
-            print(filepath, list(bdata.keys()))
+            logging.info(filepath, list(bdata.keys()))
             continue 
         idx += 1
 
@@ -323,6 +331,7 @@ def process(src, dst, body_models, split_file=None, yolo_model=None):
         data['offset_floor_height'] = offset_floor_height
         data['contacts'] = contacts[1:]
 
+        logging.info(f'File saved at {os.path.join(dst, f"{idx}.pkl")}')
         with open(os.path.join(dst, '{}.pkl'.format(idx)), 'wb') as f:
             pickle.dump(data, f)
 

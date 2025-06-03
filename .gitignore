@@ -5,7 +5,12 @@
 *.npz
 *.avi
 *.png
+*.job
+*.txt
+
 data/keypoints/
 data/__pycache__/
 pose_lifter/animate.py
 yolo_bad_frames.txt
+.cache
+saves/

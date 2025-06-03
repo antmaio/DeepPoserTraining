@@ -5,27 +5,38 @@ From https://github.com/zxz267/AvatarJLM
 import os
 import argparse
 import torch
+import logging
 
 from data.utils_data import process
 from data.utils_yolo import init_yolo
 from human_body_prior.body_model.body_model import BodyModel
 from data.data_config import OUTPUT_DIR
 
-
 if __name__ == '__main__':
+
+    # Overwrite log file every time the script runs
+    logging.basicConfig(
+        filename='data_process_log.txt',
+        filemode='w',  # 'w' = overwrite
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', type=str, required=True, help='Path to data root.')
     parser.add_argument('--protocol', type=int, default=1, choices=[1, 2, 3], help='Prepare data mode.')
-    parser.add_argument('--yolo_model', type=str, default=None, choices=['yolov8n-pose','yolov8s-pose','yolov8l-pose','yolov8m-pose','yolov8x-pose','yolov8x-pose-p6', 'ground_truth'])
+    #parser.add_argument('--yolo_model', type=str, default=None, choices=['yolov8n-pose','yolov8s-pose','yolov8l-pose','yolov8m-pose','yolov8x-pose','yolov8x-pose-p6', 'ground_truth'])
+    parser.add_argument('--yolo_model', type=str, default=None)
     parser.add_argument('--support_data', type=str, default='./support_data', help='Path to support data.')
     parser.add_argument('--data_split', type=str, default='./data/data_split', help='Path to data split.')
     cfg = parser.parse_args() 
+
 
     bm_fname_male = os.path.join(cfg.support_data, 'body_models/smplh/{}/model.npz'.format('male'))
     dmpl_fname_male = os.path.join(cfg.support_data, 'body_models/dmpls/{}/model.npz'.format('male'))
     bm_fname_female = os.path.join(cfg.support_data, 'body_models/smplh/{}/model.npz'.format('female'))
     dmpl_fname_female = os.path.join(cfg.support_data, 'body_models/dmpls/{}/model.npz'.format('female'))
-
+    
     num_betas = 16 # number of body parameters
     num_dmpls = 8 # number of DMPL parameters
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -53,7 +64,7 @@ if __name__ == '__main__':
                 else:
                     dst = os.path.join(f'{OUTPUT_DIR}', f"protocol_{cfg.protocol}", subset ,phase)
                 os.makedirs(dst, exist_ok=True)
-                process(src, dst, body_models, split_file, yolo_model)
+                process(src, dst, body_models, split_file, yolo_model, logging=logging)
 
     elif cfg.protocol in [3]:
         train_set = ['MPI_HDM05', 'BioMotionLab_NTroje', 'CMU', 'ACCAD', 'BMLmovi', 'EKUT', 'Eyes_Japan_Dataset', 'KIT', 'MPI_Limits', 'MPI_mosh', 'SFU', 'TotalCapture']
@@ -64,4 +75,4 @@ if __name__ == '__main__':
             src = os.path.join(cfg.root, subset)
             dst = os.path.join(f"./data/protocol_{cfg.protocol}", subset, phase)
             os.makedirs(dst, exist_ok=True)
-            process(src, dst, body_models, yolo_model)
+            process(src, dst, body_models, yolo_model, logging=logging)
