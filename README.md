@@ -27,6 +27,7 @@ pip install trimesh==4.4.0
 pip install ultralytics==8.3.92
 pip install pyrender==0.1.45
 pip install -U numpy==1.26.4
+pip install tomli
 ```
 or install via the yaml file
 ```bash
