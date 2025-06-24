@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 from torch.nn.utils.parametrizations import weight_norm
+
 import logging
 # Configure logging to print to terminal
 logging.basicConfig(
@@ -19,7 +20,7 @@ logging.basicConfig(
 # Internal
 from . import base, BaseModelInput, BaseModelOutput
 from anim.data.amass import SmplxJoints
-from utils.utils_transform import two_axis_to_matrix, matrix_to_two_axis, rotational_fk
+from utils.utils_transform import two_axis_to_matrix, matrix_to_two_axis, rotational_fk, matrix_to_angle_axis
 from human_body_prior.body_model.body_model import BodyModel
 import anim.bm_config as bm_C
 
@@ -408,23 +409,19 @@ class HMDPoserExt(base.BaseModel):
         # --- Computing transl_pred and joints_pred ---
         global_orient_3x3_pred = two_axis_to_matrix(global_orient_6d_pred)
         body_pose_3x3_pred = two_axis_to_matrix(body_pose_6d_pred)
-
-        logging.info("------------------------")
-        logging.info(global_orient_6d_pred.shape)
-        logging.info(body_pose_6d_pred.shape)
-        logging.info('-----------')
-        assert False
-
+        global_orient_aa_pred = matrix_to_angle_axis(global_orient_3x3_pred)
+        body_pose_aa_pred = matrix_to_angle_axis(body_pose_3x3_pred)
 
         sq_size = batch_size * win_len
 
         bm = self.bm_male if model_input.gender == 'male' else self.bm_female
         body_parms_pred = {
-            'pose_body': body_pose_6d_pred,
-            'global_orient' : global_orient_6d_pred
+            'pose_body': body_pose_aa_pred.view(sq_size, (SmplxJoints.NUM_JTS-1)*3),
+            'root_orient' : global_orient_aa_pred.view(sq_size, -1)
         }  
+        # Log shapes of each tensor in the dict
+        
         body_pose_local = bm(**{k:v for k, v in body_parms_pred.items() if k in ['pose_body', 'root_orient']})
-        joints_local_pred = body_pose_local.Jtr[:,:SmplxJoints.NUM_JTS]
         
         '''
         smplx_output_pred = self.smplx_layer(
@@ -433,8 +430,9 @@ class HMDPoserExt(base.BaseModel):
             body_pose=body_pose_3x3_pred.view(sq_size, SmplxJoints.NUM_JTS - 1, 3, 3))
         '''
         
-        joints_local_pred = (smplx_output_pred.joints[:, :SmplxJoints.NUM_JTS]
+        joints_local_pred = (body_pose_local.Jtr[:, :SmplxJoints.NUM_JTS]
                              .reshape(batch_size, win_len, -1, 3))
+
         #vertices_local_pred = smplx_output_pred.vertices.reshape(batch_size, win_len, -1, 3)
         head_pos_local_pred = joints_local_pred[:, :, SmplxJoints.HEAD]
         # Force predictions to agree with head ground truth since HMD 6DoF always available
@@ -449,6 +447,7 @@ class HMDPoserExt(base.BaseModel):
             global_orient=global_orient_3x3_pred,
             body_pose=body_pose_3x3_pred,
             joints=joints_pred,
+            gender = model_input.gender
             #vertices=vertices_pred,
             #faces=self.smplx_layer.faces,
         )

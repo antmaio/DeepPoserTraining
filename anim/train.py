@@ -94,9 +94,9 @@ def __main():
                 with torch.no_grad():
                     model_input, model_target = models.batch_to_model_input_and_target(
                         train_batch, device, dtype)
+                    _ = model(model_input)
                     logging.info('pass ok')
-                    #_ = model(model_input)
-                
+                    
     except KeyboardInterrupt:
         logging.info("Ending run, but saving model first")
     except models.StopTrainingException as e:
