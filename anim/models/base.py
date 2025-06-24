@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 # Internal
 #import utils
+import utils.utils_transform as transform
 from anim.data.amass import SmplxJoints
 
 # You can raise this in your model to interrupt training in train.py
@@ -31,11 +32,12 @@ class BaseModelInput:
     # TODO Weaken the below assumption that we only use HMR to allow for MediaPipe compatibility
     # hmr_presence: torch.BoolTensor  # TODO Utilise for sparsity
     hmr_joints: torch.Tensor  # (batch_size, win_len, SmplxJoints.NUM_JTS, 3)
-    hmr_body_pose: torch.Tensor  # (batch_size, win_len, SmplxJoints.NUM_JTS - 1, 3)
-    # Providing these for HMR passthrough (e.g. aligner model)
+    hmr_body_pose: torch.Tensor  # (batch_size, win_len, SmplxJoints.NUM_JTS - 1, 3, 3)
     hmr_global_orient: torch.Tensor  # (batch_size, win_len, 3, 3)
-    hmr_vertices: torch.Tensor  # (batch_size, win_len, num_vertices, 3)
-    hmr_faces: list[int]  # same indices for all sets of vertices
+    #Optional
+    betas: typing.Optional[torch.Tensor]#(batch_size, win_len, num_betas)
+    gender: typing.Optional[int] #(batch_size,)
+
 
 
 @dataclass
@@ -43,13 +45,14 @@ class BaseModelOutput:
     # betas for SMPLX model, can be omitted to signal different model (e.g. aligner)
     betas: typing.Optional[torch.Tensor]
     # TODO Do we make other params optional?
-    transl: torch.Tensor  # (batch_size, win_len, 3)
+    #transl: torch.Tensor  # (batch_size, win_len, 3)
     global_orient: torch.Tensor  # (batch_size, win_len, 3, 3)
-    body_pose: torch.Tensor  # (batch_size, win_len, SmplxJoints.NUM_JTS-1, 3)
+    body_pose: torch.Tensor  # (batch_size, win_len, SmplxJoints.NUM_JTS-1, 3, 3)
     # Redundant but packing in here anyway for convenience:
     joints: torch.Tensor   # (batch_size, win_len, SmplxJoints.NUM_JTS, 3)
-    vertices: torch.Tensor
-    faces: list[int]  # for rendering; same set of indices for all vertices
+    #vertices: torch.Tensor
+    #faces: list[int]  # for rendering; same set of indices for all vertices
+    gender: typing.Optional[int] #(batch_size,)
 
 
 class BaseModel(torch.nn.Module):
@@ -140,15 +143,44 @@ def batch_to_model_input_and_target(
     betas = batch['betas'].to(device, dtype)
     rotations_local_full_gt_list = batch['rotations_local_full_gt_list'].to(device, dtype)
     hmd_position_global_full_gt_list = batch['hmd_position_global_full_gt_list'].to(device, dtype)
-    head_global_trans_list = batch['head_global_trans_list'].to(device, dtype)
-    body_parms_list = batch['body_parms_list']
+    gender = batch['gender'].to(device, dtype)
+    #head_global_trans_list = batch['head_global_trans_list'].to(device, dtype)
+    #body_parms_list = batch['body_parms_list']
+
+    batch_size, win_len, *_ = betas.shape
+
+    rotation = hmd_position_global_full_gt_list[:,:,:SmplxJoints.NUM_JTS*6].reshape(batch_size, win_len, SmplxJoints.NUM_JTS, 6)
+    position =  hmd_position_global_full_gt_list[:,:,SmplxJoints.NUM_JTS*6*2:SmplxJoints.NUM_JTS*6*2+3*SmplxJoints.NUM_JTS].reshape(batch_size, win_len, SmplxJoints.NUM_JTS, 3)
+    body_pose = transform.two_axis_to_matrix(rotations_local_full_gt_list.reshape(batch_size, win_len, SmplxJoints.NUM_JTS, 6))
 
 
-    print(hmd_position_global_full_gt_list.shape)
-    assert False
+    model_input = BaseModelInput(
+        batch_size          = batch_size,
+        win_len             = win_len, 
+        head_pos_global     = position[:,:,SmplxJoints.HEAD],
+        head_rot_global     = transform.two_axis_to_matrix(rotation[:,:,SmplxJoints.HEAD]),
+        lh_pos_global       = position[:,:,SmplxJoints.LEFT_WRIST],
+        lh_rot_global       = transform.two_axis_to_matrix(rotation[:,:,SmplxJoints.LEFT_WRIST]),
+        rh_pos_global       = position[:,:,SmplxJoints.RIGHT_WRIST],           
+        rh_rot_global       = transform.two_axis_to_matrix(rotation[:,:,SmplxJoints.RIGHT_WRIST]),
+        # Emulate HMR using ground truth data (thus synthetic); omitting betas due to incompatibility across models
+        hmr_joints          = position,
+        hmr_body_pose       = body_pose[:,:,1:],
+        hmr_global_orient   = body_pose[:,:,0],
+        betas               = betas,
+        gender              = gender
+    )
+
+    model_target = BaseModelOutput(
+        betas               = betas,
+        global_orient       = transform.two_axis_to_matrix(rotation[:,:,SmplxJoints.PELVIS]),
+        body_pose           = body_pose[:,:,1:],
+        joints              = position,
+        gender              = gender
+    )
 
     # --- Dataset API (see amass.AMASSNeutralDataset and egobody.EgoBodyDataset for implementations) ---
-         
+    """
     batch_size, win_len, *_ = betas.shape
 
     joints = None
@@ -208,4 +240,5 @@ def batch_to_model_input_and_target(
         vertices=vertices,
         faces=faces,
     )
+    """
     return model_input, model_target

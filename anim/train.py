@@ -53,7 +53,6 @@ def __main():
         dtype = torch.float32
     else:
         raise NotImplementedError
-
     
     # --- Create/load model ---
     training_from_scratch = os.path.isfile(args.model)
@@ -70,6 +69,9 @@ def __main():
         model = models.load_model(model_dir, last_epoch)
         logging.info(f"Training '{model_dir}' from from epoch {last_epoch}; note that train_info.json will be overwritten")
 
+    model = model.to(device, dtype)
+
+    # --- Dataset preparation ---
     train_dataset = amass.get_dataset(args.dataset, 'train', args.data_ratio,
                                      win_len=args.win_len, win_overlap=args.win_overlap, zero_betas=args.zero_betas, dtype=dtype)
     val_dataset = amass.get_dataset(args.dataset, 'test', args.data_ratio,
@@ -92,8 +94,9 @@ def __main():
                 with torch.no_grad():
                     model_input, model_target = models.batch_to_model_input_and_target(
                         train_batch, device, dtype)
-                    
-
+                    logging.info('pass ok')
+                    #_ = model(model_input)
+                
     except KeyboardInterrupt:
         logging.info("Ending run, but saving model first")
     except models.StopTrainingException as e:

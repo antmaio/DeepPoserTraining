@@ -8,10 +8,20 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 from torch.nn.utils.parametrizations import weight_norm
+import logging
+# Configure logging to print to terminal
+logging.basicConfig(
+    level=logging.INFO,                      # Set minimum log level
+    format='%(asctime)s - %(levelname)s - %(message)s'  # Customize output format
+)
+
+
 # Internal
 from . import base, BaseModelInput, BaseModelOutput
 from anim.data.amass import SmplxJoints
 from utils.utils_transform import two_axis_to_matrix, matrix_to_two_axis, rotational_fk
+from human_body_prior.body_model.body_model import BodyModel
+import anim.bm_config as bm_C
 
 class HMDPoserExt(base.BaseModel):
     """ Extension of HMD-Poser to gracefully exploit 'hmr_joints' and/or 'hmr_body_pose' """
@@ -26,7 +36,8 @@ class HMDPoserExt(base.BaseModel):
                  use_hmr_body_pose: bool = False,
                  use_hmr_velocities: bool = False,
                  use_rnn_layer_norm: bool = False,
-                 num_betas: int = 10,
+                 num_betas: int = bm_C._NUM_BETAS_,
+                 num_dmpls: int = bm_C._NUM_DMPLS_,
                  hidden_size: int = 256,
                  num_blocks: int = 2,
                  rnn_type: str = 'lstm',  # TODO validate
@@ -86,7 +97,11 @@ class HMDPoserExt(base.BaseModel):
         assert max_scale_augment >= min_scale_augment
         assert noise_augment_strength >= 0.0
 
+        # --- Body models ---
         self.num_betas = num_betas
+        self.num_dmpls = num_dmpls
+        self.bm_male = BodyModel(bm_fname=bm_C._BM_FNAME_MALE_, num_betas=num_betas, num_dmpls=num_dmpls, dmpl_fname=bm_C._DMPL_FNAME_MALE_)
+        self.bm_female = BodyModel(bm_fname=bm_C._BM_FNAME_MALE_, num_betas=num_betas, num_dmpls=num_dmpls, dmpl_fname=bm_C._DMPL_FNAME_FEMALE_)
         #self.smplx_layer = get_frozen_smplx_layer(gender='neutral', num_betas=num_betas)
 
         # --- HMD embeddings ---
@@ -394,29 +409,48 @@ class HMDPoserExt(base.BaseModel):
         global_orient_3x3_pred = two_axis_to_matrix(global_orient_6d_pred)
         body_pose_3x3_pred = two_axis_to_matrix(body_pose_6d_pred)
 
+        logging.info("------------------------")
+        logging.info(global_orient_6d_pred.shape)
+        logging.info(body_pose_6d_pred.shape)
+        logging.info('-----------')
+        assert False
+
+
         sq_size = batch_size * win_len
+
+        bm = self.bm_male if model_input.gender == 'male' else self.bm_female
+        body_parms_pred = {
+            'pose_body': body_pose_6d_pred,
+            'global_orient' : global_orient_6d_pred
+        }  
+        body_pose_local = bm(**{k:v for k, v in body_parms_pred.items() if k in ['pose_body', 'root_orient']})
+        joints_local_pred = body_pose_local.Jtr[:,:SmplxJoints.NUM_JTS]
+        
+        '''
         smplx_output_pred = self.smplx_layer(
             betas=betas_pred.view(sq_size, self.num_betas),
             global_orient=global_orient_3x3_pred.view(sq_size, 3, 3),
             body_pose=body_pose_3x3_pred.view(sq_size, SmplxJoints.NUM_JTS - 1, 3, 3))
+        '''
+        
         joints_local_pred = (smplx_output_pred.joints[:, :SmplxJoints.NUM_JTS]
                              .reshape(batch_size, win_len, -1, 3))
-        vertices_local_pred = smplx_output_pred.vertices.reshape(batch_size, win_len, -1, 3)
+        #vertices_local_pred = smplx_output_pred.vertices.reshape(batch_size, win_len, -1, 3)
         head_pos_local_pred = joints_local_pred[:, :, SmplxJoints.HEAD]
         # Force predictions to agree with head ground truth since HMD 6DoF always available
         correction = model_input.head_pos_global - head_pos_local_pred
-        transl_pred = correction
+        #transl_pred = correction
         joints_pred = joints_local_pred + correction[..., None, :]
-        vertices_pred = vertices_local_pred + correction[..., None, :]
+        #vertices_pred = vertices_local_pred + correction[..., None, :]
 
         return base.BaseModelOutput(
             betas=betas_pred,
-            transl=transl_pred,
+            #transl=transl_pred,
             global_orient=global_orient_3x3_pred,
             body_pose=body_pose_3x3_pred,
             joints=joints_pred,
-            vertices=vertices_pred,
-            faces=self.smplx_layer.faces,
+            #vertices=vertices_pred,
+            #faces=self.smplx_layer.faces,
         )
 
     def forward_pass(self, model_input: BaseModelInput, model_target: BaseModelOutput, optimise=False) -> dict:

@@ -11,6 +11,10 @@ import config
 #import utils
 #import data
 
+class Gender(enum.IntEnum):
+    MALE = 0
+    FEMALE = 1
+
 class SmplxJoints(enum.IntEnum):
     PELVIS = 0  # The root joint for which the model moves about via 'global_orient'.
     LEFT_HIP = 1  # The remaining joints are governed by 'body_pose' (and indirectly 'betas')
@@ -110,7 +114,7 @@ class AMASSDataset(Dataset):
         win_overlap:int     = 5,
         zero_betas:bool     = True, #zero_betas means average morpholgy
         dtype:torch.dtype   = torch.float32,
-        phase:str           ='train'
+        phase:str           = 'train'
     ):
         assert win_len > 0
         assert 0 <= win_overlap < win_len
@@ -122,7 +126,7 @@ class AMASSDataset(Dataset):
         self._hmd_position_global_full_gt_list = []
         self._head_global_trans_list = []
         self._betas_wins = []
-        #self._gender = []
+        self._gender = []
         #self._framerate = []
         #self._filepath = []
         self._body_parms_list = []
@@ -165,6 +169,11 @@ class AMASSDataset(Dataset):
                     #self._filepath.append(data_gt['filepath'])
                     self._body_parms_list.append(body_parms_list)
 
+                    if data_gt['gender'] == 'male':
+                        self._gender.append(torch.tensor(Gender.MALE, dtype=dtype))
+                    elif data_gt['gender'] == 'female':
+                        self._gender.append(torch.tensor(Gender.FEMALE, dtype=dtype))
+
             self._num_wins = len(self._betas_wins)
             self._win_len = win_len
             self._zero_betas = zero_betas
@@ -180,7 +189,11 @@ class AMASSDataset(Dataset):
                 #data_kp = load_kp(relative_rec_path) #get 3D keypoints
 
                 num_frames = data_gt['hmd_position_global_full_gt_list'].shape[0]
-
+                
+                if data_gt['gender'] == 'male':
+                    self._gender.append(torch.tensor(Gender.MALE, dtype=dtype))
+                elif data_gt['gender'] == 'female':
+                    self._gender.append(torch.tensor(Gender.FEMALE, dtype=dtype))
 
                 rotation_local_full_gt_list = data_gt['rotation_local_full_gt_list'].cpu().clone()
                 hmd_position_global_full_gt_list = data_gt['hmd_position_global_full_gt_list'].cpu().clone()
@@ -215,7 +228,7 @@ class AMASSDataset(Dataset):
             'hmd_position_global_full_gt_list': self._hmd_position_global_full_gt_list[idx].clone(),
             'head_global_trans_list': self._head_global_trans_list[idx].clone(),
             'betas': betas, 
-            #'gender': self._gender[idx],
+            'gender': self._gender[idx].clone(),
             #'framerate' : self._framerate[idx],
             #'filepath': self._filepath[idx],
             'body_parms_list': body_parms_list
