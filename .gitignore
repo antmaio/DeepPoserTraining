@@ -14,3 +14,4 @@ pose_lifter/animate.py
 yolo_bad_frames.txt
 .cache
 saves/
+temp/

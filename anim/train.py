@@ -3,7 +3,9 @@
 import argparse
 import logging
 import os
+import numpy as np 
 
+from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
 import torch 
 
@@ -33,7 +35,7 @@ def __main():
     parser.add_argument('--batch_size', type=int, default=200)
     parser.add_argument('--dataset', type=str,
                         choices=('amass-p1', 'amass-p2', 'egobody'), default='amass-p2')
-    parser.add_argument('--win_len', type=int, default=20)
+    parser.add_argument('--win_len', type=int, default=40)
     parser.add_argument('--win_overlap', type=int, default=5)
     parser.add_argument('--zero_betas', action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument('--data_ratio', type=float, default=None,
@@ -84,24 +86,83 @@ def __main():
     
     logging.info(f'Length (train | valid): {len(train_dataloader)} | {len(val_dataloader)}')
 
+    log_dir: str = os.path.join(model_dir, 'logs')
+    log_writer = SummaryWriter(log_dir)
     # --- Main Loop --- 
+    error_last_save = False
     epoch = last_epoch + 1
     try:
         while epoch < args.max_epoch:
+
+             # --- Train ---
             model.train()
+            
             train_losses = None
             for train_batch in train_dataloader:
                 with torch.no_grad():
                     model_input, model_target = models.batch_to_model_input_and_target(
-                        train_batch, device, dtype)
-                    _ = model(model_input)
-                    logging.info('pass ok')
+                        train_batch, device, dtype, mode3d=model.mode3d)
                     
+                model.reset()
+                batch_train_losses = model.forward_pass(model_input, model_target, optimise=True)
+
+                if train_losses is None:
+                    train_losses = {loss_str: [] for loss_str in batch_train_losses}
+                for loss_str in train_losses:
+                    train_losses[loss_str].append(batch_train_losses[loss_str].detach().cpu().numpy())
+
+            # --- Validation ---
+
+            model.eval()
+
+            val_losses = None
+            for val_batch in val_dataloader:
+                with torch.no_grad():
+                    model_input, model_target = models.batch_to_model_input_and_target(
+                        val_batch, device, dtype, mode3d=model.mode3d)
+
+                    model.reset()
+                    batch_val_losses = model.forward_pass(model_input, model_target)
+
+                if val_losses is None:
+                    val_losses = {loss_str: [] for loss_str in batch_val_losses}
+                for loss_str in val_losses:
+                    val_losses[loss_str].append(batch_val_losses[loss_str].detach().cpu().numpy())
+
+            # --- Log ----
+
+            for loss_str in train_losses:
+                train_losses[loss_str] = np.mean(train_losses[loss_str])
+                val_losses[loss_str] = np.mean(val_losses[loss_str])
+                logging.info(f"Epoch={epoch} | {loss_str}: train={train_losses[loss_str]:.6f} | val={val_losses[loss_str]:.6f}")
+
+                try:
+                    log_writer.add_scalars(
+                        loss_str, {'train': train_losses[loss_str], 'val': val_losses[loss_str]}, epoch)
+                except OSError:
+                    pass  # Ignore I/O error so skip this epoch log
+
+            # --- Save model ---
+
+            if error_last_save or (epoch % args.epochs_per_save == 0):
+                error_last_save = False
+                try:
+                    models.save_model(model, model_dir, epoch)
+                except OSError:
+                    print(f"Experienced OSError attempting to save model during epoch {epoch}")
+                    error_last_save = True  # Ignore I/O error but try to save next epoch
+
+            model.epoch_end(epoch, train_losses, val_losses)
+            epoch += 1
+
     except KeyboardInterrupt:
-        logging.info("Ending run, but saving model first")
+        print("Ending run, but saving model first")
     except models.StopTrainingException as e:
-        logging.info("Training interrupted:", e)
+        print("Training interrupted:", e)
     models.save_model(model, model_dir, epoch)
+
+    print(f"Finished training {model_dir} at epoch {epoch}")
+
     
 if __name__ == '__main__':
     __main()

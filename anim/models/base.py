@@ -13,6 +13,7 @@ from dataclasses import dataclass
 #import utils
 import utils.utils_transform as transform
 from anim.data.amass import SmplxJoints
+import config
 
 # You can raise this in your model to interrupt training in train.py
 #   Specifically, raise in forward_pass only when optimise=True
@@ -31,12 +32,13 @@ class BaseModelInput:
     rh_rot_global: torch.Tensor  # ditto
     # TODO Weaken the below assumption that we only use HMR to allow for MediaPipe compatibility
     # hmr_presence: torch.BoolTensor  # TODO Utilise for sparsity
-    hmr_joints: torch.Tensor  # (batch_size, win_len, SmplxJoints.NUM_JTS, 3)
+    hmr_joints: torch.Tensor  # (batch_size, win_len, SmplxJoints.NUM_JTS, 3) or (batch_size, win_len, YoloJoints.NUM_JTS, 3) 
     hmr_body_pose: torch.Tensor  # (batch_size, win_len, SmplxJoints.NUM_JTS - 1, 3, 3)
     hmr_global_orient: torch.Tensor  # (batch_size, win_len, 3, 3)
     #Optional
     betas: typing.Optional[torch.Tensor]#(batch_size, win_len, num_betas)
     gender: typing.Optional[int] #(batch_size,)
+    conf: typing.Optional[torch.Tensor] #(batch_size, win_len, YoloJoints.NUM_JTS, 2)
 
 
 
@@ -125,7 +127,7 @@ class BaseModel(torch.nn.Module):
 
 
 def batch_to_model_input_and_target(
-        batch: dict, device, dtype) -> (BaseModelInput, BaseModelOutput):
+        batch: dict, device, dtype, mode3d:str='gt') -> (BaseModelInput, BaseModelOutput):
     
     '''
     return {
@@ -144,15 +146,24 @@ def batch_to_model_input_and_target(
     rotations_local_full_gt_list = batch['rotations_local_full_gt_list'].to(device, dtype)
     hmd_position_global_full_gt_list = batch['hmd_position_global_full_gt_list'].to(device, dtype)
     gender = batch['gender'].to(device, dtype)
-    #head_global_trans_list = batch['head_global_trans_list'].to(device, dtype)
-    #body_parms_list = batch['body_parms_list']
+    #data from external pose estimation
+    keypoints = batch['keypoints'].to(device, dtype)
+    conf = batch['conf'].to(device, dtype)
 
     batch_size, win_len, *_ = betas.shape
 
     rotation = hmd_position_global_full_gt_list[:,:,:SmplxJoints.NUM_JTS*6].reshape(batch_size, win_len, SmplxJoints.NUM_JTS, 6)
-    position =  hmd_position_global_full_gt_list[:,:,SmplxJoints.NUM_JTS*6*2:SmplxJoints.NUM_JTS*6*2+3*SmplxJoints.NUM_JTS].reshape(batch_size, win_len, SmplxJoints.NUM_JTS, 3)
     body_pose = transform.two_axis_to_matrix(rotations_local_full_gt_list.reshape(batch_size, win_len, SmplxJoints.NUM_JTS, 6))
+    position =  hmd_position_global_full_gt_list[:,:,SmplxJoints.NUM_JTS*6*2:SmplxJoints.NUM_JTS*6*2+3*SmplxJoints.NUM_JTS].reshape(batch_size, win_len, SmplxJoints.NUM_JTS, 3)
 
+    # Mode3d indicates what 3D positions are used to guide body tracking
+    #TODO yolo3D
+    if mode3d == 'external': 
+        hmr_position = keypoints.clone()
+    elif mode3d == 'gt':
+        hmr_position = position.clone()
+    else:
+        raise NotImplementedError(f"{mode3d} is not available for mode3d")
 
     model_input = BaseModelInput(
         batch_size          = batch_size,
@@ -164,11 +175,12 @@ def batch_to_model_input_and_target(
         rh_pos_global       = position[:,:,SmplxJoints.RIGHT_WRIST],           
         rh_rot_global       = transform.two_axis_to_matrix(rotation[:,:,SmplxJoints.RIGHT_WRIST]),
         # Emulate HMR using ground truth data (thus synthetic); omitting betas due to incompatibility across models
-        hmr_joints          = position,
+        hmr_joints          = hmr_position,
         hmr_body_pose       = body_pose[:,:,1:],
         hmr_global_orient   = body_pose[:,:,0],
         betas               = betas,
-        gender              = gender
+        gender              = gender,
+        conf                = conf
     )
 
     model_target = BaseModelOutput(

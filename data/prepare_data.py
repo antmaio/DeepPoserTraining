@@ -31,7 +31,6 @@ if __name__ == '__main__':
     parser.add_argument('--data_split', type=str, default='./data/data_split', help='Path to data split.')
     cfg = parser.parse_args() 
 
-
     bm_fname_male = os.path.join(cfg.support_data, 'body_models/smplh/{}/model.npz'.format('male'))
     dmpl_fname_male = os.path.join(cfg.support_data, 'body_models/dmpls/{}/model.npz'.format('male'))
     bm_fname_female = os.path.join(cfg.support_data, 'body_models/smplh/{}/model.npz'.format('female'))
@@ -43,7 +42,7 @@ if __name__ == '__main__':
     #device= 'cpu'
     bm_male = BodyModel(bm_fname=bm_fname_male, num_betas=num_betas, num_dmpls=num_dmpls, dmpl_fname=dmpl_fname_male).to(device)
     bm_female = BodyModel(bm_fname=bm_fname_female, num_betas=num_betas, num_dmpls=num_dmpls, dmpl_fname=dmpl_fname_female).to(device)
-    body_models = {'male': bm_male, 'female': bm_female} 
+    body_models = {'male': bm_male, 'female': bm_female}
 
     if cfg.yolo_model is not None and cfg.yolo_model != 'ground_truth':
         yolo_model = init_yolo(f'{cfg.yolo_model}.pt',)
@@ -64,7 +63,7 @@ if __name__ == '__main__':
                 else:
                     dst = os.path.join(f'{OUTPUT_DIR}', f"protocol_{cfg.protocol}", subset ,phase)
                 os.makedirs(dst, exist_ok=True)
-                process(src, dst, body_models, split_file, yolo_model, logging=logging)
+                process(src, dst, body_models, logging=logging, split_file=split_file, yolo_model=yolo_model)
 
     elif cfg.protocol in [3]:
         train_set = ['MPI_HDM05', 'BioMotionLab_NTroje', 'CMU', 'ACCAD', 'BMLmovi', 'EKUT', 'Eyes_Japan_Dataset', 'KIT', 'MPI_Limits', 'MPI_mosh', 'SFU', 'TotalCapture']
@@ -75,4 +74,4 @@ if __name__ == '__main__':
             src = os.path.join(cfg.root, subset)
             dst = os.path.join(f"./data/protocol_{cfg.protocol}", subset, phase)
             os.makedirs(dst, exist_ok=True)
-            process(src, dst, body_models, yolo_model, logging=logging)
+            process(src, dst, body_models, logging=logging, yolo_model=yolo_model)

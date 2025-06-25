@@ -12,7 +12,14 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import pyrender
 from pyrender import Viewer
+import logging
 import copy
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'  # Optional: controls time format
+)
 #Internal
 from data.camera_config import CAMERA_PATH
 from data.yolo_data_gen import extract_from_xml
@@ -157,6 +164,13 @@ def animate_2d_keypoints(yolo_keypoints: dict,
         #                     fps=30,
         #                     point_size=40,
         #                     point_color='cyan')
+
+def set_mesh_viewer(camera_files:List[str]) -> MeshViewer2:
+    # all cameras share the same intrinsic
+    K, _, (image_width, image_height) = extract_from_xml(camera_files[0])
+    mv = MeshViewer2(width=image_width, height=image_height, intrinsic=K, use_offscreen=True)
+    return mv
+
 def triangulate(
     Ks:np.ndarray, 
     camera_poses:np.ndarray, 
@@ -164,7 +178,8 @@ def triangulate(
     yolo_keypoints:dict, 
     cam_keys_for_triang:List[str],
     frame_id:int,
-    joint_id:int
+    joint_id:int,
+    mv:MeshViewer2
 ):
     
     """
@@ -238,8 +253,7 @@ def triangulate(
         points2d.append(point2d)
 
         #get camera parameters
-        mv = MeshViewer2(width=image_width, height=image_height, intrinsic=Ks[cam_id], use_offscreen=True)
-        camera_pose = camera_poses[cam_id]  
+        camera_pose = camera_poses[cam_id]
         mv.updateCam(camera_pose, Ks[cam_id])
 
         KMats.append(mv.viewer._renderer._get_camera_matrices(mv.scene))
@@ -333,10 +347,13 @@ def __main():
     parse.add_argument('--dataset_type', default='amass_p1', type=str, help="Dataset split as in AvatarJLM")
     parse.add_argument('--dataroot', default='./data/keypoints/yolov8n-pose_protocol_1', type=str, help='Path to pkl files')
     args = parse.parse_args()
-
     
     # Get all camera XML files (any naming pattern)
     camera_files = glob.glob(os.path.join(CAMERA_PATH, '*.xml'))
+
+    
+    # meshviewer for cam update  
+    mv = set_mesh_viewer(camera_files)
 
     dataset_type = args.dataset_type
     dataroot = args.dataroot
@@ -357,39 +374,42 @@ def __main():
             with open(filename, 'rb') as f:
                 data = pickle.load(f)
         
-        yolo_keypoints = data['yolo_keypoints'] 
+            yolo_keypoints = data['yolo_keypoints']
 
-        confidences = yolo_keypoints['confidences']
-        nframes, njoints, _ = confidences.shape
-                
-        # Get the indices of the top-2 cameras with highest confidence per joint
-        top2_conf, cams_max_conf = torch.topk(confidences, k=2, dim=-1)
-        
-        # `cams_max_conf` now contains the camera IDs (0, 1, or 2) of the top-2 confidences
-        points3d = np.zeros((nframes, njoints, 3))
+            confidences = yolo_keypoints['confidences']
+            nframes, njoints, _ = confidences.shape
+                    
+            # Get the indices of the top-2 cameras with highest confidence per joint
+            top2_conf, cams_max_conf = torch.topk(confidences, k=2, dim=-1)
 
-        for f in range(nframes):
-            for j in range(njoints):
-                cam_keys_for_triang = [f'vcam{k}' for k in cams_max_conf[f,j]]
-                #animate_2d_keypoints(yolo_keypoints, cam_keys_for_triang, output_dir='./')
+            
+            # `cams_max_conf` now contains the camera IDs (0, 1, or 2) of the top-2 confidences
+            points3d = np.zeros((nframes, njoints, 3))
 
-                Ks, camera_poses, image_sizes = get_cam_params_from_key(cam_keys_for_triang, camera_files)
-        
-                #Get 3D world positions from 2D yolo keypoints 
-                point3d = triangulate(
-                    Ks=Ks, 
-                    camera_poses=camera_poses, 
-                    yolo_keypoints=yolo_keypoints, 
-                    cam_keys_for_triang=cam_keys_for_triang,
-                    image_sizes=image_sizes,
-                    frame_id=f,
-                    joint_id=j
-                )
 
-                points3d[f, j] = point3d
-        
-        np.savez(os.path.splitext(filename)[0] + ".npz", points3d=points3d)
+            for f in range(nframes):
+                for j in range(njoints):
+                    cam_keys_for_triang = [f'vcam{k}' for k in cams_max_conf[f,j]]
+                    #animate_2d_keypoints(yolo_keypoints, cam_keys_for_triang, output_dir='./')
 
+                    Ks, camera_poses, image_sizes = get_cam_params_from_key(cam_keys_for_triang, camera_files)
+            
+                    #Get 3D world positions from 2D yolo keypoints 
+                    point3d = triangulate(
+                        Ks=Ks, 
+                        camera_poses=camera_poses, 
+                        yolo_keypoints=yolo_keypoints, 
+                        cam_keys_for_triang=cam_keys_for_triang,
+                        image_sizes=image_sizes,
+                        frame_id=f,
+                        joint_id=j,
+                        mv=mv
+                    )
+
+                    points3d[f, j] = point3d
+                    
+            np.savez(os.path.splitext(filename)[0] + ".npz", points3d=points3d, conf=top2_conf)
+            logging.info(f'{os.path.splitext(filename)[0]}.npz succesfully saved!')
 
 
 if __name__ == '__main__':

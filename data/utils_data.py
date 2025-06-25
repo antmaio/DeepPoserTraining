@@ -185,7 +185,7 @@ def syn_acc(v, smooth_n=4):
              for i in range(0, v.shape[0] - smooth_n * 2)])
     return acc
 
-def process(src, dst, body_models, split_file=None, yolo_model=None, logging):
+def process(src, dst, body_models, logging, split_file=None, yolo_model=None):
     assert src and dst
     
     rotation_local_full_gt_list = []

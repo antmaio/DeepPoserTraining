@@ -6,6 +6,8 @@ import os
 import pathlib 
 import torch
 import enum
+import pickle
+
 # Internal
 import config
 #import utils
@@ -42,6 +44,28 @@ class SmplxJoints(enum.IntEnum):
 
 SMPLX_BODY_HIERARCHY = (-1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17, 18, 19)
 
+#YOLO
+class YoloJoints(enum.IntEnum):
+    """Enum mapping YOLO pose estimation joint names to their indices"""
+    NOSE = 0
+    LEFT_EYE = 1
+    RIGHT_EYE = 2
+    LEFT_EAR = 3
+    RIGHT_EAR = 4
+    LEFT_SHOULDER = 5
+    RIGHT_SHOULDER = 6
+    LEFT_ELBOW = 7
+    RIGHT_ELBOW = 8
+    LEFT_WRIST = 9
+    RIGHT_WRIST = 10
+    LEFT_HIP = 11
+    RIGHT_HIP = 12
+    LEFT_KNEE = 13
+    RIGHT_KNEE = 14
+    LEFT_ANKLE = 15
+    RIGHT_ANKLE = 16
+    NUM_JTS = 17
+
 assert os.path.isdir(config.DATA_DIR), f"{config.DATA_DIR} is not a directory"
 
 def get_protocol1_relative_recording_paths(use_cmu: bool = True, use_hdm05: bool = True, use_bmlrub: bool = True)-> List[str]:
@@ -57,10 +81,12 @@ def load_gt(relative_rec_path:str, fps:int=60):
     data = np.load(relative_rec_path, allow_pickle=True)
     return data
 
-def load_kp(relative_rec_path:str, fps:int=60):
-    relative_rec_path = pathlib.Path(relative_rec_path)  # make sure it's a Path object
-    npz_path = relative_rec_path.with_suffix('.npz')
-    data = np.load(npz_path)
+def load_kp(relative_rec_path: str):
+    """
+    Given a .pkl path, loads the corresponding .npz file.
+    """
+    npz_path = pathlib.Path(relative_rec_path).with_suffix('.npz')
+    data = np.load(npz_path, allow_pickle=True)
     return data
 
 def get_protocol2_split_relative_paths(relative_rec_path:str):
@@ -130,7 +156,8 @@ class AMASSDataset(Dataset):
         #self._framerate = []
         #self._filepath = []
         self._body_parms_list = []
-    
+        self._external_3d_kp = []
+        self._external_conf = []
         # 
         # --- Train ---
         # 
@@ -140,15 +167,22 @@ class AMASSDataset(Dataset):
 
             for relative_rec_path in relative_recording_paths:
                 data_gt = load_gt(relative_rec_path) #get sparse signals from VR
-                #data_kp = load_kp(relative_rec_path) #get 3D keypoints
+                data_kp = load_kp(relative_rec_path) #get 3D keypoints
+
+                assert len(data_gt['hmd_position_global_full_gt_list'].shape[0]) == len(data_kp['points3d']), "Length mismatch between keypoints and ground truth"
 
                 num_frames = data_gt['hmd_position_global_full_gt_list'].shape[0]
-
+                
+                # gt
                 rotation_local_full_gt_list = data_gt['rotation_local_full_gt_list'].cpu().clone()
                 hmd_position_global_full_gt_list = data_gt['hmd_position_global_full_gt_list'].cpu().clone()
                 head_global_trans_list = data_gt['head_global_trans_list'].cpu().clone()
                 betas = torch.tensor(data_gt["shape"][None,:].repeat(num_frames, axis=0), dtype=dtype)
                 body_parms_list = data_gt['body_parms_list']
+
+                #3D keypoints from pose estimation
+                keypoints = data_kp['points3d']
+                conf_scores = data_kp['conf']
 
                 if num_frames < win_len:
                     continue
@@ -163,6 +197,8 @@ class AMASSDataset(Dataset):
                     self._hmd_position_global_full_gt_list.append(hmd_position_global_full_gt_list[start_frame:end_frame])
                     self._head_global_trans_list.append(head_global_trans_list[start_frame:end_frame])
                     self._betas_wins.append(betas[start_frame:end_frame])  # expand to make consistent with EgoBody
+                    self._external_3d_kp.append(keypoints[start_frame:end_frame])
+                    self._external_conf.append(conf_scores[start_frame:end_frame])
 
                     #self._gender.append(data_gt['gender'])
                     #self._framerate.append(data_gt['framerate'])
@@ -186,7 +222,9 @@ class AMASSDataset(Dataset):
 
             for relative_rec_path in relative_recording_paths:
                 data_gt = load_gt(relative_rec_path) #get sparse signals from VR
-                #data_kp = load_kp(relative_rec_path) #get 3D keypoints
+                data_kp = load_kp(relative_rec_path) #get 3D keypoints
+
+                assert len(data_gt['hmd_position_global_full_gt_list'].shape[0]) == len(data_kp['points3d']), "Length mismatch between keypoints and ground truth"
 
                 num_frames = data_gt['hmd_position_global_full_gt_list'].shape[0]
                 
@@ -201,14 +239,16 @@ class AMASSDataset(Dataset):
                 betas = torch.tensor(data_gt["shape"][None,:].repeat(num_frames, axis=0), dtype=dtype)
                 body_parms_list = data_gt['body_parms_list']
 
+                #3D keypoints from pose estimation
+                keypoints = data_kp['points3d']
+                conf_scores = data_kp['conf']
+                self._external_3d_kp.append(keypoints)
+                self._external_conf.append(conf_scores)
+
                 self._rotations_local_full_gt_list.append(rotation_local_full_gt_list)
                 self._hmd_position_global_full_gt_list.append(hmd_position_global_full_gt_list)
                 self._head_global_trans_list.append(head_global_trans_list)
                 self._betas_wins.append(betas)  # expand to make consistent with EgoBody
-
-                #self._gender.append(data_gt['gender'])
-                #self._framerate.append(data_gt['framerate'])
-                #self._filepath.append(data_gt['filepath'])
                 self._body_parms_list.append(body_parms_list)
 
             self._num_wins = len(self._betas_wins)
@@ -229,6 +269,8 @@ class AMASSDataset(Dataset):
             'head_global_trans_list': self._head_global_trans_list[idx].clone(),
             'betas': betas, 
             'gender': self._gender[idx].clone(),
+            'keypoints': self._external_3d_kp[idx].clone(),
+            'conf':self._external_conf[idx].clone(),
             #'framerate' : self._framerate[idx],
             #'filepath': self._filepath[idx],
             'body_parms_list': body_parms_list

@@ -9,17 +9,9 @@ import torch.nn as nn
 from torch.utils.data import Dataset
 from torch.nn.utils.parametrizations import weight_norm
 
-import logging
-# Configure logging to print to terminal
-logging.basicConfig(
-    level=logging.INFO,                      # Set minimum log level
-    format='%(asctime)s - %(levelname)s - %(message)s'  # Customize output format
-)
-
-
 # Internal
 from . import base, BaseModelInput, BaseModelOutput
-from anim.data.amass import SmplxJoints
+from anim.data.amass import SmplxJoints, YoloJoints
 from utils.utils_transform import two_axis_to_matrix, matrix_to_two_axis, rotational_fk, matrix_to_angle_axis
 from human_body_prior.body_model.body_model import BodyModel
 import anim.bm_config as bm_C
@@ -34,6 +26,7 @@ class HMDPoserExt(base.BaseModel):
     def __init__(self,
                  # Architecture
                  chosen_jts: list[int] = None,  # indices from SmplxJoints, None defaults to 'SEWHKA'
+                 mode3d:str = None,
                  use_hmr_body_pose: bool = False,
                  use_hmr_velocities: bool = False,
                  use_rnn_layer_norm: bool = False,
@@ -62,29 +55,35 @@ class HMDPoserExt(base.BaseModel):
                  lr: float = 1e-3,
                  # Augmentation
                  augmentation_seed: int = 42,
-                 use_rotational_augment: bool = True,
+                 use_rotational_augment: bool = False,
                  use_scale_augment: bool = False,
-                 use_noise_augment: bool = True,
+                 use_noise_augment: bool = False,
                  min_scale_augment: float = 0.9,
                  max_scale_augment: float = 1.1,
-                 noise_augment_strength: float = 0.01,
+                 noise_augment_strength: float = 0.0,
                  ):
         super().__init__()
 
         if chosen_jts is None:
+            if mode3d == 'gt':
+                topology = SmplxJoints
+            elif mode3d == 'external':
+                topology = YoloJoints
+
             # default to SEWHKA
             chosen_jts = [
-                SmplxJoints.LEFT_SHOULDER, SmplxJoints.RIGHT_SHOULDER,
-                SmplxJoints.LEFT_ELBOW, SmplxJoints.RIGHT_ELBOW,
-                SmplxJoints.LEFT_WRIST, SmplxJoints.RIGHT_WRIST,
-                SmplxJoints.LEFT_HIP, SmplxJoints.RIGHT_HIP,
-                SmplxJoints.LEFT_KNEE, SmplxJoints.RIGHT_KNEE,
-                SmplxJoints.LEFT_ANKLE, SmplxJoints.RIGHT_ANKLE,
+                topology.LEFT_SHOULDER, topology.RIGHT_SHOULDER,
+                topology.LEFT_ELBOW, topology.RIGHT_ELBOW,
+                topology.LEFT_WRIST, topology.RIGHT_WRIST,
+                topology.LEFT_HIP, topology.RIGHT_HIP,
+                topology.LEFT_KNEE, topology.RIGHT_KNEE,
+                topology.LEFT_ANKLE, topology.RIGHT_ANKLE,
             ]
 
-        for jt in chosen_jts:
-            assert 0 < jt < SmplxJoints.NUM_JTS, \
-                f"An element ({jt}) of 'chosen_jts' was outside acceptable range 1-{SmplxJoints.NUM_JTS - 1}))"
+            for jt in chosen_jts:
+                assert 0 < jt < topology.NUM_JTS, \
+                    f"An element ({jt}) of 'chosen_jts' was outside acceptable range 1-{topology.NUM_JTS - 1}))"
+
         assert hidden_size % 4 == 0, f"hidden_size ({hidden_size}) must be a multiple of 4"
         assert num_blocks > 0
         assert rnn_type in ('lstm', 'gru')
@@ -106,7 +105,7 @@ class HMDPoserExt(base.BaseModel):
         #self.smplx_layer = get_frozen_smplx_layer(gender='neutral', num_betas=num_betas)
 
         # --- HMD embeddings ---
-
+        self.mode3d = mode3d
         # rot, rot_vel, pos, pos_vel; per hmd signal
         self.num_hmd_channels = 5  # head, lh, rh, lh_local, rh_local
         self.hmd_embers = nn.ModuleList([

@@ -2,7 +2,6 @@ import numpy as np
 from torch.nn import functional as F
 from human_body_prior.tools import tgm_conversion as tgm
 from human_body_prior.tools.rotation_tools import aa2matrot, local2global_pose, matrot2aa
-
 import torch
 
 """ 
@@ -117,8 +116,56 @@ def angle_axis_to_matrix(angle_axis: torch.Tensor) -> torch.Tensor:
     r += (1 - angles_cos[..., None, None]) * torch.matmul(k, k)
     return r
 
+def matrix_to_angle_axis(matrix: torch.Tensor) -> torch.Tensor:
+    """
+    Convert rotations given as rotation matrices to axis/angle.
 
-def matrix_to_angle_axis(matrix: torch.Tensor, warn: bool = True) -> torch.Tensor:
+    Args:
+        matrix: Rotation matrices as tensor of shape (..., 3, 3).
+
+    Returns:
+        Rotations given as a vector in axis angle form, as a tensor
+            of shape (..., 3), where the magnitude is the angle
+            turned anticlockwise in radians around the vector's
+            direction.
+
+    """
+    if matrix.size(-1) != 3 or matrix.size(-2) != 3:
+        raise ValueError(f"Invalid rotation matrix shape {matrix.shape}.")
+
+    omegas = torch.stack(
+        [
+            matrix[..., 2, 1] - matrix[..., 1, 2],
+            matrix[..., 0, 2] - matrix[..., 2, 0],
+            matrix[..., 1, 0] - matrix[..., 0, 1],
+        ],
+        dim=-1,
+    )
+    norms = torch.norm(omegas, p=2, dim=-1, keepdim=True)
+    traces = torch.diagonal(matrix, dim1=-2, dim2=-1).sum(-1).unsqueeze(-1)
+    angles = torch.atan2(norms, traces - 1)
+
+    zeros = torch.zeros(3, dtype=matrix.dtype, device=matrix.device)
+    omegas = torch.where(torch.isclose(angles, torch.zeros_like(angles)), zeros, omegas)
+
+    near_pi = angles.isclose(angles.new_full((1,), torch.pi)).squeeze(-1)
+
+    axis_angles = torch.empty_like(omegas)
+    axis_angles[~near_pi] = (
+        0.5 * omegas[~near_pi] / torch.sinc(angles[~near_pi] / torch.pi)
+    )
+
+    # this derives from: nnT = (R + 1) / 2
+    n = 0.5 * (
+        matrix[near_pi][..., 0, :]
+        + torch.eye(1, 3, dtype=matrix.dtype, device=matrix.device)
+    )
+    axis_angles[near_pi] = angles[near_pi] * n / torch.norm(n)
+
+    return axis_angles
+
+#old
+def _matrix_to_angle_axis(matrix: torch.Tensor, warn: bool = True) -> torch.Tensor:
     """
     Converts from 3x3 matrix rotation representation to angle axis
     :param matrix: shape (..., 3, 3)
@@ -192,6 +239,7 @@ def rotational_fk(global_orient_3x3: torch.Tensor, body_pose_3x3: torch.Tensor):
     :param body_pose_3x3: (..., 21, 3, 3)
     :return: shape (..., 21, 3, 3)
     """
+    import anim.data.amass as data
     assert global_orient_3x3.shape[-2:] == (3, 3)
     assert body_pose_3x3.shape[-3:] == (data.SmplxJoints.NUM_JTS - 1, 3, 3), f"shape={body_pose_3x3.shape}"
     hierarchy = data.SMPLX_BODY_HIERARCHY
