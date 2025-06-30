@@ -18,8 +18,6 @@ def __main():
 
     # Overwrite log file every time the script runs
     logging.basicConfig(
-        filename='anim_process_log.txt',
-        filemode='w',  # 'w' = overwrite
         format='%(asctime)s - %(levelname)s - %(message)s',
         level=logging.INFO
     )

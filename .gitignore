@@ -3,6 +3,7 @@
 *.pkl
 *.pyc
 *.npz
+*.npy
 *.avi
 *.png
 *.job
@@ -15,3 +16,6 @@ yolo_bad_frames.txt
 .cache
 saves/
 temp/
+
+pose_lifter/J_regressor_coco.npy
+_debug.py

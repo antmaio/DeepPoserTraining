@@ -147,13 +147,11 @@ class HMDPoserExt(base.BaseModel):
         self.joint_embers = nn.ModuleList([create_hmr_embedding() for _ in range(self.num_chosen_jts)])
 
         # ---
-
         self.use_rnn_layer_norm = use_rnn_layer_norm
         if self.use_rnn_layer_norm:
             self.rnn_layer_norm = nn.LayerNorm(hidden_size, eps=1e-6)
 
         # --- Temporal encoding ---
-
         self.num_channels = self.num_hmd_channels + self.num_chosen_jts
         self.num_blocks = num_blocks
         rnn_module = torch.nn.LSTM if rnn_type == 'lstm' else torch.nn.GRU

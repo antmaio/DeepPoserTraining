@@ -6,12 +6,11 @@ import os
 import pathlib 
 import torch
 import enum
-import pickle
 
 # Internal
 import config
-#import utils
-#import data
+
+FPS = 60.0
 
 class Gender(enum.IntEnum):
     MALE = 0
@@ -169,7 +168,7 @@ class AMASSDataset(Dataset):
                 data_gt = load_gt(relative_rec_path) #get sparse signals from VR
                 data_kp = load_kp(relative_rec_path) #get 3D keypoints
 
-                assert len(data_gt['hmd_position_global_full_gt_list'].shape[0]) == len(data_kp['points3d']), "Length mismatch between keypoints and ground truth"
+                assert len(data_gt['hmd_position_global_full_gt_list']) == len(data_kp['points3d']), "Length mismatch between keypoints and ground truth"
 
                 num_frames = data_gt['hmd_position_global_full_gt_list'].shape[0]
                 
@@ -181,8 +180,8 @@ class AMASSDataset(Dataset):
                 body_parms_list = data_gt['body_parms_list']
 
                 #3D keypoints from pose estimation
-                keypoints = data_kp['points3d']
-                conf_scores = data_kp['conf']
+                keypoints = torch.tensor(data_kp['points3d'], dtype=dtype) 
+                conf_scores = torch.tensor(data_kp['conf'], dtype=dtype)
 
                 if num_frames < win_len:
                     continue

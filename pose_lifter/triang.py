@@ -371,6 +371,10 @@ def __main():
         print('-------------------------------number of {} data is {}'.format(phase, len(filename_list)))
     
         for filename in filename_list:
+            if os.path.exists(f'{os.path.splitext(filename)[0]}.npz'):
+                print(f'{os.path.splitext(filename)[0]}.npz already exists!')
+                continue
+            
             with open(filename, 'rb') as f:
                 data = pickle.load(f)
         
@@ -382,10 +386,8 @@ def __main():
             # Get the indices of the top-2 cameras with highest confidence per joint
             top2_conf, cams_max_conf = torch.topk(confidences, k=2, dim=-1)
 
-            
             # `cams_max_conf` now contains the camera IDs (0, 1, or 2) of the top-2 confidences
             points3d = np.zeros((nframes, njoints, 3))
-
 
             for f in range(nframes):
                 for j in range(njoints):

@@ -217,7 +217,7 @@ def process(src, dst, body_models, logging, split_file=None, yolo_model=None):
             framerate = bdata["mocap_framerate"]
         except:
             logging.info(filepath, list(bdata.keys()))
-            continue 
+            continue
         idx += 1
 
         #if os.path.exists(os.path.join(dst, '{}.pkl'.format(idx))):
@@ -243,6 +243,11 @@ def process(src, dst, body_models, logging, split_file=None, yolo_model=None):
         body_pose_world.v = body_pose_world.v.cpu()
         body_pose_world.Jtr = body_pose_world.Jtr.cpu()
 
+        #ground truth in coco format
+        jreg_path = os.path.join('data', 'J_regressor_coco.npy') 
+        jregressor = torch.tensor(np.load(jreg_path), dtype=body_pose_world.v.dtype)
+        joints_coco = torch.einsum('bik,ji->bjk', [body_pose_world.v, jregressor])
+
         output_aa = torch.Tensor(bdata_poses[:, :66]).reshape(-1,3)
         output_6d = utils_transform.aa2sixd(output_aa).reshape(bdata_poses.shape[0],-1)
         rotation_local_full_gt_list = output_6d[1:]
@@ -252,7 +257,7 @@ def process(src, dst, body_models, logging, split_file=None, yolo_model=None):
         # pass very short sequence
         if body_pose_world.v.shape[0] <= 10:
             continue
-
+        
         # -------------------------------- get synthetic IMU data ----------------------------------
         ji_mask = [18, 19, 4, 5, 15, 0]
         vi_mask = [1961, 5424, 1176, 4662, 411, 3021]
@@ -312,6 +317,7 @@ def process(src, dst, body_models, logging, split_file=None, yolo_model=None):
         # dict udpate            
         data['yolo_keypoints']['yolo_version'] =  yolo_keypoints['yolo_version']
         data['yolo_keypoints']['confidences'] = yolo_keypoints['conf']
+        data['yolo_keypoints']['ground_truth'] = joints_coco
         for cam_key in [k for k in yolo_keypoints.keys() if k.startswith('vcam')]:
             data['yolo_keypoints'][cam_key] = yolo_keypoints[cam_key]
 
