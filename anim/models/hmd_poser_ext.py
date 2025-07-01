@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 from torch.nn.utils.parametrizations import weight_norm
+import logging
 
 # Internal
 from . import base, BaseModelInput, BaseModelOutput
@@ -15,6 +16,14 @@ from anim.data.amass import SmplxJoints, YoloJoints
 from utils.utils_transform import two_axis_to_matrix, matrix_to_two_axis, rotational_fk, matrix_to_angle_axis
 from human_body_prior.body_model.body_model import BodyModel
 import anim.bm_config as bm_C
+import _debug as DEBUG
+
+# Overwrite log file every time the script runs
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+
 
 class HMDPoserExt(base.BaseModel):
     """ Extension of HMD-Poser to gracefully exploit 'hmr_joints' and/or 'hmr_body_pose' """
@@ -405,9 +414,23 @@ class HMDPoserExt(base.BaseModel):
         betas_pred = self.shape_head(feats)
         self.betas_pred = betas_pred
 
+        #TODO remove if ok
+        #DEBUG.subplot_rot_6d(body_pose_6d_pred, save_path="rot_joint_subplot_6d_pred_only.png", j=SmplxJoints.LEFT_FOOT-1)
+        #logging.info('6D min max : ', body_pose_6d_pred.max(), body_pose_6d_pred.min())
+       
+
         # --- Computing transl_pred and joints_pred ---
         global_orient_3x3_pred = two_axis_to_matrix(global_orient_6d_pred)
         body_pose_3x3_pred = two_axis_to_matrix(body_pose_6d_pred)
+
+        #TODO remove if ok
+        #DEBUG.subplot_rot(body_pose_3x3_pred,save_path="rot_joint_subplot_pred_only.png", j=SmplxJoints.LEFT_FOOT-1)
+        #logging.info('3x3 min max : ', body_pose_3x3_pred.max(), body_pose_3x3_pred.min())
+
+        #TODO remove (just for debug purpose)
+        body_pose_3x3_pred[:,:,SmplxJoints.LEFT_FOOT-1] = torch.abs(body_pose_3x3_pred[:,:,SmplxJoints.LEFT_FOOT-1]) 
+        body_pose_3x3_pred[:,:,SmplxJoints.RIGHT_FOOT-1]= torch.abs(body_pose_3x3_pred[:,:,SmplxJoints.RIGHT_FOOT-1])
+
         global_orient_aa_pred = matrix_to_angle_axis(global_orient_3x3_pred)
         body_pose_aa_pred = matrix_to_angle_axis(body_pose_3x3_pred)
 

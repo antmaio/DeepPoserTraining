@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import utils.utils_transform as transform
 from anim.data.amass import SmplxJoints
 import config
-
+import _debug as DEBUG 
 # You can raise this in your model to interrupt training in train.py
 #   Specifically, raise in forward_pass only when optimise=True
 class StopTrainingException(Exception):
@@ -156,8 +156,10 @@ def batch_to_model_input_and_target(
     body_pose = transform.two_axis_to_matrix(rotations_local_full_gt_list.reshape(batch_size, win_len, SmplxJoints.NUM_JTS, 6))
     position =  hmd_position_global_full_gt_list[:,:,SmplxJoints.NUM_JTS*6*2:SmplxJoints.NUM_JTS*6*2+3*SmplxJoints.NUM_JTS].reshape(batch_size, win_len, SmplxJoints.NUM_JTS, 3)
 
+    #TODO REMOVE
+    #DEBUG.scatter_plot_3d_pose(position, b=0,f=0) #ok
+
     # Mode3d indicates what 3D positions are used to guide body tracking
-    #TODO yolo3D
     if mode3d == 'external': 
         hmr_position = keypoints.clone()
     elif mode3d == 'gt':

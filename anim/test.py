@@ -17,6 +17,8 @@ import anim.train as train
 from anim.data import amass
 import anim.models as models
 from utils import utils_transform
+import _debug as DEBUG
+from anim.data.amass import SmplxJoints, YoloJoints
 
 def __main():
 
@@ -89,6 +91,7 @@ def __main():
     body_pose_pred_list = []
     joints_gt_list = []
     joints_pred_list = []
+
     for batch in tqdm(iter(dataloader)):
         model_input, model_target = models.batch_to_model_input_and_target(
             batch, model_device, dtype, mode3d=model.mode3d)
@@ -103,6 +106,11 @@ def __main():
         joints_gt_list.append(model_target.joints.to(stats_device))
         joints_pred_list.append(model_output.joints.to(stats_device))
 
+        #TODO remove debug if ok
+        #DEBUG.scatter_plot_3d_pose(model_target.joints, model_output.joints, b=59, f=2)
+        #DEBUG.plot_rot(model_target.body_pose, model_output.body_pose, b=59, j=SmplxJoints.RIGHT_FOOT-1)
+        #DEBUG.subplot_rot(model_target.body_pose, model_output.body_pose, b=59, j=SmplxJoints.RIGHT_FOOT-1)
+        
     global_orient_gt_cat = torch.cat(global_orient_gt_list, dim=0)
     global_orient_pred_cat = torch.cat(global_orient_pred_list, dim=0)
     body_pose_gt_cat = torch.cat(body_pose_gt_list, dim=0)

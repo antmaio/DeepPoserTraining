@@ -240,7 +240,6 @@ class AMASSDataset(Dataset):
             self._win_len = win_len
             self._zero_betas = zero_betas
 
-        
         # 
         # --- Test ---
         # 
