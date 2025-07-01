@@ -164,6 +164,16 @@ def matrix_to_angle_axis(matrix: torch.Tensor) -> torch.Tensor:
 
     return axis_angles
 
+def rotation_angle_radians(mat: torch.Tensor):
+    # Input must be a rotation matrix; i.e. with shape (..., 3, 3)
+    # Math: https://en.wikipedia.org/wiki/Rotation_matrix#Determining_the_angle
+    assert mat.shape[-2:] == (3, 3)
+    trace = torch.einsum('...ii->...', mat)
+    arg = (trace - 1.0) / 2.0
+    arg = arg.clamp(-1.0, 1.0)  # clip to prevent NaNs
+    angle = torch.arccos(arg)
+    return angle
+
 #old
 def _matrix_to_angle_axis(matrix: torch.Tensor, warn: bool = True) -> torch.Tensor:
     """
@@ -251,17 +261,6 @@ def rotational_fk(global_orient_3x3: torch.Tensor, body_pose_3x3: torch.Tensor):
         parent_mat = global_orient_3x3[..., None, :, :] if parent_jt == 0 else body_pose_global_3x3_list[parent_jt - 1]
         body_pose_global_3x3_list.append(parent_mat @ body_pose_3x3[..., jt - 1:jt, :, :])
     return torch.cat(body_pose_global_3x3_list, dim=-3)
-
-
-def rotation_angle_radians(mat: torch.Tensor):
-    # Input must be a rotation matrix; i.e. with shape (..., 3, 3)
-    # Note: no validation that the input is a valid matrix is performed
-    # Math: https://en.wikipedia.org/wiki/Rotation_matrix#Determining_the_angle
-    trace = torch.einsum('...ii->...', mat)
-    arg = (trace - 1.0) / 2.0
-    arg = arg.clamp(-1.0, 1.0)  # clip to prevent NaNs
-    angle = torch.arccos(arg)
-    return angle
 
 
 def to_homogeneous(pos: torch.Tensor, rot: torch.Tensor):

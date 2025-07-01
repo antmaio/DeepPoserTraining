@@ -4,17 +4,29 @@ import argparse
 import logging
 import os
 import numpy as np 
-
+import json
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
 import torch 
 
 #Internal
 from anim.data import amass 
-import anim.models as models 
+import anim.models as models
+
+__TRAIN_INFO_NAME = 'train_info.json'
+
+def get_model_train_info(model_dir: str):
+    os.path.isdir(model_dir)
+    train_info_path = os.path.join(model_dir, __TRAIN_INFO_NAME)
+    if not os.path.exists(train_info_path):
+        logging.info(f'{train_info_path} does not exists, then ignored')
+        return None
+    else:
+        with open(train_info_path, 'r') as fp:
+            train_info = json.load(fp)
+        return train_info
 
 def __main():
-
 
     # Overwrite log file every time the script runs
     logging.basicConfig(
@@ -68,6 +80,19 @@ def __main():
         last_epoch = models.get_last_model_epoch(model_dir)
         model = models.load_model(model_dir, last_epoch)
         logging.info(f"Training '{model_dir}' from from epoch {last_epoch}; note that train_info.json will be overwritten")
+
+        # Save training arguments
+        train_info = {
+            'dataset': args.dataset,
+            'batch_size': args.batch_size,
+            'win_len': args.win_len,
+            'win_overlap': args.win_overlap,
+            'zero_betas': args.zero_betas,
+            'data_ratio': args.data_ratio
+        }
+        train_info_path = os.path.join(model_dir, __TRAIN_INFO_NAME)
+        with open(train_info_path, 'w') as fp:
+            json.dump(train_info, fp, indent=4)
 
     model = model.to(device, dtype)
 

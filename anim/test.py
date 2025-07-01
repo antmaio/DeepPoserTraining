@@ -10,13 +10,22 @@ from torch.utils.data import DataLoader
 import torch
 import json
 import os
+import logging
+
 # Internal
-import train
-from anim.data import amass 
-import anim.models as models 
-import utils
+import anim.train as train
+from anim.data import amass
+import anim.models as models
+from utils import utils_transform
 
 def __main():
+
+    # Overwrite log file every time the script runs
+    logging.basicConfig(
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
+
     
     _ = torch.autograd.set_grad_enabled(False)
 
@@ -27,7 +36,7 @@ def __main():
     parser.add_argument('split', type=str, choices=('train', 'val', 'test', 'full'))
     parser.add_argument('--checkpoint', type=int, default=None)
     parser.add_argument('--batch_size', type=int, default=None)
-    parser.add_argument('--win_len', type=int, default=None)
+    parser.add_argument('--win_len', type=int, default=None)    
     parser.add_argument('--win_overlap', type=int, default=None)
     parser.add_argument('--zero_betas', action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument('--model_device_str', type=str, default='cuda')
@@ -48,15 +57,19 @@ def __main():
 
     # Use same parameters as from last training run of model if unspecified
     train_info = train.get_model_train_info(model_dir)
-    if batch_size is None:
-        batch_size = train_info['batch_size']
-    if win_len is None:
-        win_len = train_info['win_len']
-    if win_overlap is None:
-        win_overlap = train_info['win_overlap']
-    if zero_betas is None:
-        zero_betas = train_info['zero_betas']
-    
+    if train_info is not None:
+        if batch_size is None:
+            batch_size = train_info['batch_size']
+        if win_len is None:
+            win_len = train_info['win_len']
+        if win_overlap is None:
+            win_overlap = train_info['win_overlap']
+        if zero_betas is None:
+            zero_betas = train_info['zero_betas']
+    else:
+        if any(v is None for v in [batch_size, win_len, win_overlap, zero_betas]):
+            raise ValueError('train info not provided in file nor in args')
+
     if checkpoint is None:
         checkpoint = models.get_last_model_epoch(model_dir)
     model = models.load_model(model_dir, checkpoint)
@@ -107,10 +120,10 @@ def __main():
 
     # Mean per joint rotational error
     global_orient_delta_cat = global_orient_pred_cat @ torch.linalg.inv(global_orient_gt_cat)
-    global_orient_rot_err = utils.rotation_angle_radians(global_orient_delta_cat)
+    global_orient_rot_err = utils_transform.rotation_angle_radians(global_orient_delta_cat)
     global_orient_rot_err = torch.rad2deg(global_orient_rot_err)
     body_pose_delta_cat = body_pose_pred_cat @ torch.linalg.inv(body_pose_gt_cat)
-    body_pose_rot_err = utils.rotation_angle_radians(body_pose_delta_cat)
+    body_pose_rot_err = utils_transform.rotation_angle_radians(body_pose_delta_cat)
     body_pose_rot_err = torch.rad2deg(body_pose_rot_err)
     num_jts = amass.SmplxJoints.NUM_JTS
     mpjre_local = body_pose_rot_err.mean()
@@ -128,9 +141,12 @@ def __main():
     mpjve_lower = 100 * vel_err[..., amass.SMPLX_LOWER_JOINTS].mean()
 
     # TODO If you use jitter, make sure it is what previous works do, or redefine it
-    jitter_pred = (joints_pred_cat[:, 3:] - 3 * joints_pred_cat[:, 2:-1] + 3 * joints_pred_cat[:, 1:-2] - joints_pred_cat[:, :-3])
-    jitter_gt = joints_gt_cat[:, 3:] - 3 * joints_gt_cat[:, 2:-1] + 3 * joints_gt_cat[:, 1:-2] - joints_gt_cat[:, :-3]
-    jitter = 0.01 * (amass.FPS ** 3) * (jitter_pred - jitter_gt).square().sum(dim=-1).sqrt().mean()
+    jitter_pred = (amass.FPS ** 3) * (joints_pred_cat[:, 3:] - 3 * joints_pred_cat[:, 2:-1]  + 3 * joints_pred_cat[:, 1:-2]  - joints_pred_cat[:, :-3])
+    jitter_gt   = (amass.FPS ** 3) * (joints_gt_cat[:, 3:]   - 3 * joints_gt_cat[:, 2:-1]    + 3 * joints_gt_cat[:, 1:-2]    - joints_gt_cat[:, :-3])
+
+    jitter_pred = jitter_pred.mean()
+    jitter_gt = jitter_gt.mean()
+    jitter = jitter_pred / jitter_gt
 
     # Convert tensors to float values
     results = {
@@ -144,15 +160,18 @@ def __main():
         "MPJRE_Local_Lower": float(mpjre_local_lower.detach().cpu().numpy()),
         "MPJVE": float(mpjve.detach().cpu().numpy()),
         "MPJVE_Upper": float(mpjve_upper.detach().cpu().numpy()),
-        "MPJVE_Lower": float(mpjve_lower.detach().cpu().numpy())
+        "MPJVE_Lower": float(mpjve_lower.detach().cpu().numpy()),
+        "Jitter_Pred": float(jitter_pred.mean().detach().cpu().numpy()),
+        "Jitter_Gt": float(jitter_gt.mean().detach().cpu().numpy()),
+        "Jitter": float(jitter.detach().cpu().numpy())
     }
     # Save to a JSON file
     with open(os.path.join(model_dir, f"eval_synthetic_{dataset_str}_{split}.json"), "w") as fp:
         json.dump(results, fp, indent=4)
-    print("Results saved to eval_synthetic_results.json")
+    logging.info("Results saved to eval_synthetic_results.json")
 
-    print(f"--- Eval with synthetic pose estimation data on {dataset_str} {split} ---")
-    print(f"MPJPE = {results['MPJPE']:.3f} (cm)\n"
+    logging.info(f"--- Eval with synthetic pose estimation data on {dataset_str} {split} ---")
+    logging.info(f"MPJPE = {results['MPJPE']:.3f} (cm)\n"
           f"  Upper = {results['MPJPE_Upper']:.3f} (cm)\n"
           f"  Lower = {results['MPJPE_Lower']:.3f} (cm)\n"
           f"MPJRE = {results['MPJRE']:.3f} (°)\n"
@@ -162,7 +181,11 @@ def __main():
           f"    Lower = {results['MPJRE_Local_Lower']:.3f} (°)\n"
           f"MPJVE = {results['MPJVE']:.3f} (cm/s)"
           f"  Upper = {results['MPJVE_Upper']:.3f} (cm/s)\n"
-          f"  Lower = {results['MPJVE_Lower']:.3f} (cm/s)")
+          f"  Lower = {results['MPJVE_Lower']:.3f} (cm/s) \n"
+          f"Jitter_Pred = {results['Jitter_Pred']:.3f} \n" 
+          f"Jitter_Gt = {results['Jitter_Gt']:.3f} \n"
+          f"Jitter = {results['Jitter']:.3f}" 
+    )
 
 if __name__ == '__main__':
     __main()

@@ -43,6 +43,33 @@ class SmplxJoints(enum.IntEnum):
 
 SMPLX_BODY_HIERARCHY = (-1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17, 18, 19)
 
+SMPLX_UPPER_JOINTS = [
+    SmplxJoints.SPINE_1,
+    SmplxJoints.SPINE_2,
+    SmplxJoints.SPINE_3,
+    SmplxJoints.NECK,
+    SmplxJoints.LEFT_COLLAR,
+    SmplxJoints.RIGHT_COLLAR,
+    SmplxJoints.HEAD,
+    SmplxJoints.LEFT_SHOULDER,
+    SmplxJoints.RIGHT_SHOULDER,
+    SmplxJoints.LEFT_ELBOW,
+    SmplxJoints.RIGHT_ELBOW,
+    SmplxJoints.LEFT_WRIST,
+    SmplxJoints.RIGHT_WRIST
+]
+
+SMPLX_LOWER_JOINTS = [
+    SmplxJoints.PELVIS,
+    SmplxJoints.LEFT_HIP,
+    SmplxJoints.RIGHT_HIP,
+    SmplxJoints.LEFT_KNEE,
+    SmplxJoints.RIGHT_KNEE,
+    SmplxJoints.LEFT_ANKLE,
+    SmplxJoints.RIGHT_ANKLE,
+    SmplxJoints.LEFT_FOOT,
+    SmplxJoints.RIGHT_FOOT,
+]
 #YOLO
 class YoloJoints(enum.IntEnum):
     """Enum mapping YOLO pose estimation joint names to their indices"""

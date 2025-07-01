@@ -69,6 +69,8 @@ class HMDPoserExt(base.BaseModel):
                 topology = SmplxJoints
             elif mode3d == 'external':
                 topology = YoloJoints
+            else:
+                raise NotImplementedError('Skeleton topology not found!')
 
             # default to SEWHKA
             chosen_jts = [

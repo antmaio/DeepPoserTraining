@@ -317,7 +317,7 @@ def process(src, dst, body_models, logging, split_file=None, yolo_model=None):
         # dict udpate            
         data['yolo_keypoints']['yolo_version'] =  yolo_keypoints['yolo_version']
         data['yolo_keypoints']['confidences'] = yolo_keypoints['conf']
-        data['yolo_keypoints']['ground_truth'] = joints_coco
+        data['yolo_keypoints']['ground_truth'] = joints_coco[1:]
         for cam_key in [k for k in yolo_keypoints.keys() if k.startswith('vcam')]:
             data['yolo_keypoints'][cam_key] = yolo_keypoints[cam_key]
 
