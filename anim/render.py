@@ -10,10 +10,25 @@ import os
 import trimesh
 from tqdm import tqdm
 # Internal
-import models
-import data
-import train
+import anim.models as models
+import anim.train as train
+import anim.data.amass as amass
+import anim.bm_config as bm_C
+from anim.models.base import BaseModel
+from human_body_prior.body_model.body_model import BodyModel
+from utils.utils_transform import matrix_to_angle_axis, two_axis_to_matrix
 
+def basemodel2vertices(model_base:BaseModel, bm:BodyModel)->torch.Tensor:
+
+    global_orient_aa = matrix_to_angle_axis(model_base.global_orient)
+    body_pose_aa = matrix_to_angle_axis(model_base.body_pose)
+    num_frames = global_orient_aa.shape[1] #assuming batch tensors
+    body_parms = {
+        'pose_body': body_pose_aa.view(num_frames, (amass.SmplxJoints.NUM_JTS-1)*3),
+        'root_orient' : global_orient_aa.view(num_frames, -1)
+    }
+    body_pose_local= bm(**{k:v for k, v in body_parms.items() if k in ['pose_body', 'root_orient']})
+    print('Vertices shape : ', body_pose_local.v.shape)
 
 def __main():
     _ = torch.autograd.set_grad_enabled(False)
@@ -59,19 +74,14 @@ def __main():
     model = model.to(device, dtype)
     model.eval()
 
-    dataset_smplx_layers = data.get_dataset_smplx_layers(dataset_str)
-    for layer_idx in range(len(dataset_smplx_layers)):
-        dataset_smplx_layers[layer_idx] = dataset_smplx_layers[layer_idx].to(device, dtype)
-
-    rec_names = data.get_dataset_recording_names_for_split(dataset_str, split)
+    rec_names = amass.get_dataset_recording_names_for_split(dataset_str, split)
     if rec_idx < 0:
         rec_idx = random.randrange(0, len(rec_names))
     assert 0 <= rec_idx < len(rec_names)
     rec_name = rec_names[rec_idx]
 
-    if dataset_str == 'amass':
-        import amass
-        batch = amass.load_smplx(rec_name)
+    if 'amass' in dataset_str:
+        batch = amass.load_smpl(rec_name)
     elif dataset_str == 'egobody':
         raise NotImplementedError(f"Unknown dataset: {dataset_str}") 
         import egobody
@@ -80,21 +90,35 @@ def __main():
         raise NotImplementedError(f"Unknown dataset: {dataset_str}")
 
 
-    max_num_frames = batch['transl'].shape[0]
+    max_num_frames = batch['rotations_local_full_gt_list'].shape[0]
     if (num_frames <= 0) or (num_frames > max_num_frames):
         num_frames = max_num_frames
+
     # Make into proper batch
-    # TODO Could likely handle smplx_layer_idx more gracefully, e.g. via load_smplx* above
-    batch['smplx_layer_idx'] = torch.Tensor([1 if batch['gender'] == 'female' else 0])
     batch['betas'] = batch['betas'][None, :num_frames]
-    batch['transl'] = batch['transl'][None, :num_frames]
-    batch['global_orient'] = batch['global_orient'][None, :num_frames]
-    batch['body_pose'] = batch['body_pose'][None, :num_frames]
     if zero_betas:
         batch['betas'] = torch.zeros_like(batch['betas'])
+    batch['rotations_local_full_gt_list'] = batch['rotations_local_full_gt_list'][None, :num_frames]
+    batch['hmd_position_global_full_gt_list'] = batch['hmd_position_global_full_gt_list'][None, :num_frames]
+    batch['head_global_trans_list'] = batch['head_global_trans_list'][None, :num_frames]
+    batch['gender'] = batch['gender'][None]
+    batch['keypoints'] = batch['keypoints'][None, :num_frames]
+    batch['conf'] = batch['conf'][None, :num_frames]
 
-    model_input, model_target = models.batch_to_model_input_and_target(batch, dataset_smplx_layers, device, dtype)
+    bm_male = BodyModel(bm_fname=bm_C._BM_FNAME_MALE_, num_betas=bm_C._NUM_BETAS_, num_dmpls=bm_C._NUM_DMPLS_, dmpl_fname=bm_C._DMPL_FNAME_MALE_)
+    bm_female = BodyModel(bm_fname=bm_C._BM_FNAME_MALE_, num_betas=bm_C._NUM_BETAS_, num_dmpls=bm_C._NUM_DMPLS_, dmpl_fname=bm_C._DMPL_FNAME_FEMALE_)
+
+    # Inference and process output and target
+    model_input, model_target = models.batch_to_model_input_and_target(batch, device, dtype, mode3d=model.mode3d)
     model_pred = model(model_input)  # no 'reset' needed
+    bm = bm_male if model_input.gender == amass.Gender.MALE else bm_female
+    #Pred 
+    basemodel2vertices(model_pred, bm)
+    assert False
+
+    #Target
+    basemodel2vertices(model_target, bm)
+        
 
     vertices_target_np = model_target.vertices[0].cpu().numpy()
     vertices_pred_np = model_pred.vertices[0].cpu().numpy()
@@ -102,7 +126,7 @@ def __main():
     faces_pred = model_pred.faces
 
     fourcc = 0x7634706d  # mp4v
-    fps = data.FPS
+    fps = amass.FPS
     render_fps = int(args.render_time_scale * fps)
     model_dir_name = pathlib.Path(model_dir).name
     video_path = os.path.join(
@@ -139,7 +163,6 @@ def __main():
     target_mat = pyrender.MetallicRoughnessMaterial(
         metallicFactor=0.0, alphaMode='OPAQUE', baseColorFactor=target_color)
     renderer = pyrender.OffscreenRenderer(video_width, video_height)
-    smplx_faces = dataset_smplx_layers[0].faces
 
     for frame_idx in tqdm(range(num_frames)):
         mesh_target = trimesh.Trimesh(vertices_target_np[frame_idx], faces_target, process=False)

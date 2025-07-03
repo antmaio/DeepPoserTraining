@@ -1,14 +1,15 @@
 
 from torch.utils.data import Dataset
-from typing import List, Tuple, Iterable
+from typing import List, Tuple, Iterable, Union
 import numpy as np
 import os
 import pathlib 
 import torch
 import enum
-
 # Internal
 import config
+
+__CACHE_DIR = os.path.join(config.CACHE_DIR, 'hmd-poser-ext-amass')
 
 FPS = 60.0
 
@@ -149,8 +150,7 @@ def get_dataset(dataset_str: str, split: str, ratio: float = None, **dataset_arg
         rec_names = rec_names[:new_num_recs]
 
     if dataset_str in ('amass-p1', 'amass-p2'):
-        
-        dataset = AMASSDataset(rec_names, **dataset_args)
+        dataset = AMASSDataset(rec_names, phase=split, **dataset_args)
     elif dataset_str == 'egobody':
         import egobody
         dataset = egobody.EgoBodyDataset(rec_names, **dataset_args)
@@ -158,6 +158,147 @@ def get_dataset(dataset_str: str, split: str, ratio: float = None, **dataset_arg
         raise NotImplementedError(f"Dataset '{dataset_str}' not supported.")
     
     return dataset
+
+def load_smpl(relative_rec_path: Union[str, pathlib.Path]) -> dict:
+
+    os.makedirs(__CACHE_DIR, exist_ok=True)
+
+    # Determine cached version name
+    if type(relative_rec_path) is not str:
+        relative_rec_path = str(relative_rec_path) 
+    cached_name = relative_rec_path.replace(os.sep, '-').replace('.npz', '') + '.pt'
+    cached_path = os.path.join(__CACHE_DIR, cached_name)
+
+    # Load from cache if entry exists
+    if os.path.exists(cached_path):
+        cached = torch.load(cached_path, weights_only=True)
+        rotations_local_full_gt_list = cached['rotations_local_full_gt_list']
+        hmd_position_global_full_gt_list = cached['hmd_position_global_full_gt_list']
+        head_global_trans_list = cached['head_global_trans_list']
+        betas = cached['betas']
+        gender = cached['gender']
+        keypoints = cached['keypoints']
+        conf_scores = cached['conf']
+        body_parms_list = cached['body_parms_list']
+    else:  # Otherwise load, compute and update cache
+        # Load from dataset
+        rec_path = os.path.join(config.AMASS_DIR, relative_rec_path)
+        try:
+            data_gt = load_gt(relative_rec_path) #get sparse signals from VR
+            data_kp = load_kp(relative_rec_path) #get 3D keypoints
+        except Exception as e: # TODO remove
+            print(e)
+            breakpoint()
+
+        # gt
+        rotations_local_full_gt_list = data_gt['rotation_local_full_gt_list'].cpu().clone()
+        hmd_position_global_full_gt_list = data_gt['hmd_position_global_full_gt_list'].cpu().clone()
+        head_global_trans_list = data_gt['head_global_trans_list'].cpu().clone()
+        num_frames = len(rotations_local_full_gt_list)
+        betas = torch.tensor(data_gt["shape"][None,:].repeat(num_frames, axis=0), dtype=torch.float32)
+        body_parms_list = data_gt['body_parms_list']
+
+        #3D keypoints from pose estimation
+        keypoints = torch.tensor(data_kp['points3d'], dtype=torch.float32)
+        conf_scores = torch.tensor(data_kp['conf'], dtype=torch.float32)
+
+        if data_gt['gender'] == 'male':
+            gender = torch.tensor(Gender.MALE, dtype=torch.float32)
+        elif data_gt['gender'] == 'female':
+            gender = torch.tensor(Gender.FEMALE, dtype=torch.float32)
+
+
+        # Update cache; the cache is a bit wasteful, but we're prioritising speed
+        cached = {
+            'rotations_local_full_gt_list' : rotations_local_full_gt_list.clone(),
+            'hmd_position_global_full_gt_list': hmd_position_global_full_gt_list.clone(),
+            'head_global_trans_list': head_global_trans_list.clone(),
+            'betas': betas.clone(), 
+            'gender': gender.clone(),
+            'keypoints': keypoints.clone(),
+            'conf': conf_scores.clone(),
+            #'framerate' : self._framerate[idx],
+            #'filepath': self._filepath[idx],
+            'body_parms_list': body_parms_list
+        }
+        os.makedirs(__CACHE_DIR, exist_ok=True)
+        torch.save(cached, cached_path)
+
+        
+    return {
+        'rotations_local_full_gt_list' : rotations_local_full_gt_list.clone(),
+        'hmd_position_global_full_gt_list': hmd_position_global_full_gt_list.clone(),
+        'head_global_trans_list': head_global_trans_list.clone(),
+        'betas': betas.clone(), 
+        'gender': gender.clone(),
+        'keypoints': keypoints.clone(),
+        'conf': conf_scores.clone(),
+        #'framerate' : self._framerate[idx],
+        #'filepath': self._filepath[idx],
+        'body_parms_list': body_parms_list
+    }
+    
+    '''
+        betas = torch.tensor(rec['betas'], dtype=torch.float32)
+        transl = torch.tensor(rec['trans'], dtype=torch.float32)
+        global_orient_aa = torch.tensor(rec['root_orient'], dtype=torch.float32)
+        body_pose_aa = torch.tensor(rec['pose_body'], dtype=torch.float32)
+        frame_rate = rec['mocap_frame_rate']
+
+        # Downsample to 60 fps
+        source_fps_is_120 = np.isclose(frame_rate, 120)
+        assert source_fps_is_120 or np.isclose(frame_rate, 60), \
+            f"mocap_frame_rate must be 60 or 120 but is {frame_rate} ({rec_path})"
+        if source_fps_is_120:
+            transl = transl[::2]
+            global_orient_aa = global_orient_aa[::2]
+            body_pose_aa = body_pose_aa[::2]
+
+        # Convert from angle axis to rotation matrix
+        global_orient = utils.angle_axis_to_matrix(global_orient_aa)
+        body_pose = utils.angle_axis_to_matrix(body_pose_aa.reshape(transl.shape[0], -1, 3))
+
+        # Modify transl and global_orient such that coordinate system is y-up
+        to_world = torch.tensor([
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0]],
+            dtype=torch.float32)
+        with torch.no_grad():
+            rest_joints = data.get_smpl_or_smplx_rest_joints(SMPLX_LAYER_NEUTRAL, betas[None])
+        hip_jt = rest_joints[:, 0] + transl
+        root = torch.zeros((transl.shape[0], 4, 4), dtype=torch.float32)
+        root[:, :3, :3] = global_orient
+        root[:, :3, 3] = hip_jt
+        root[:, 3, 3] = 1.0
+        root_world = to_world @ root
+        global_orient = root_world[:, :3, :3]
+        transl = root_world[:, :3, 3] + transl - hip_jt
+
+        # Update cache; the cache is a bit wasteful, but we're prioritising speed
+        cached = {
+            'betas': betas,
+            'transl': transl,
+            'global_orient': global_orient,
+            'body_pose': body_pose
+        }
+        os.makedirs(__CACHE_DIR, exist_ok=True)
+        torch.save(cached, cached_path)
+
+    if fps == 30:
+        transl = transl[::2]
+        global_orient = global_orient[::2]
+        body_pose = body_pose[::2]
+
+    return {
+        'betas': betas[None].expand(transl.shape[0], -1),  # add temporal dimension
+        'transl': transl,
+        'global_orient': global_orient,
+        'body_pose': body_pose
+    }
+    '''
+
 
 class AMASSDataset(Dataset):
     def __init__(self, 
@@ -168,12 +309,12 @@ class AMASSDataset(Dataset):
         dtype:torch.dtype   = torch.float32,
         phase:str           = 'train'
     ):
+        
         assert win_len > 0
         assert 0 <= win_overlap < win_len
         assert phase in ('train', 'valid', 'test'), f"Provide a valid phase, got {phase}"
 
-        self.phase = phase 
-
+        self.phase = phase
         self._rotations_local_full_gt_list = []
         self._hmd_position_global_full_gt_list = []
         self._head_global_trans_list = []
@@ -249,7 +390,7 @@ class AMASSDataset(Dataset):
                 data_gt = load_gt(relative_rec_path) #get sparse signals from VR
                 data_kp = load_kp(relative_rec_path) #get 3D keypoints
 
-                assert len(data_gt['hmd_position_global_full_gt_list'].shape[0]) == len(data_kp['points3d']), "Length mismatch between keypoints and ground truth"
+                assert len(data_gt['hmd_position_global_full_gt_list']) == len(data_kp['points3d']), "Length mismatch between keypoints and ground truth"
 
                 num_frames = data_gt['hmd_position_global_full_gt_list'].shape[0]
                 
@@ -265,8 +406,9 @@ class AMASSDataset(Dataset):
                 body_parms_list = data_gt['body_parms_list']
 
                 #3D keypoints from pose estimation
-                keypoints = data_kp['points3d']
-                conf_scores = data_kp['conf']
+                keypoints = torch.tensor(data_kp['points3d'], dtype=dtype) 
+                conf_scores = torch.tensor(data_kp['conf'], dtype=dtype)
+
                 self._external_3d_kp.append(keypoints)
                 self._external_conf.append(conf_scores)
 

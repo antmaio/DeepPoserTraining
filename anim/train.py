@@ -8,6 +8,7 @@ import json
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
 import torch 
+torch.autograd.set_detect_anomaly(True)
 
 #Internal
 from anim.data import amass 
@@ -44,7 +45,7 @@ def __main():
                         help="saving directory, only for models trained from scratch")
     parser.add_argument('--batch_size', type=int, default=200)
     parser.add_argument('--dataset', type=str,
-                        choices=('amass-p1', 'amass-p2', 'egobody'), default='amass-p2')
+                        choices=('amass-p1', 'amass-p2', 'egobody'), default='amass-p1')
     parser.add_argument('--win_len', type=int, default=40)
     parser.add_argument('--win_overlap', type=int, default=5)
     parser.add_argument('--zero_betas', action=argparse.BooleanOptionalAction, default=False)
@@ -81,18 +82,18 @@ def __main():
         model = models.load_model(model_dir, last_epoch)
         logging.info(f"Training '{model_dir}' from from epoch {last_epoch}; note that train_info.json will be overwritten")
 
-        # Save training arguments
-        train_info = {
-            'dataset': args.dataset,
-            'batch_size': args.batch_size,
-            'win_len': args.win_len,
-            'win_overlap': args.win_overlap,
-            'zero_betas': args.zero_betas,
-            'data_ratio': args.data_ratio
-        }
-        train_info_path = os.path.join(model_dir, __TRAIN_INFO_NAME)
-        with open(train_info_path, 'w') as fp:
-            json.dump(train_info, fp, indent=4)
+    # Save training arguments
+    train_info = {
+        'dataset': args.dataset,
+        'batch_size': args.batch_size,
+        'win_len': args.win_len,
+        'win_overlap': args.win_overlap,
+        'zero_betas': args.zero_betas,
+        'data_ratio': args.data_ratio
+    }
+    train_info_path = os.path.join(model_dir, __TRAIN_INFO_NAME)
+    with open(train_info_path, 'w') as fp:
+        json.dump(train_info, fp, indent=4)
 
     model = model.to(device, dtype)
 

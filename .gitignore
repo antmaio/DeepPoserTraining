@@ -16,6 +16,7 @@ yolo_bad_frames.txt
 .cache
 saves/
 temp/
+renders/
 
 pose_lifter/J_regressor_coco.npy
 _debug.py

@@ -2,4 +2,5 @@ model_str = 'hmd-poser-ext'
 [model_args]
 # chosen_jts defaults to SEWHKA
 # mode3d in ['gt', 'external', None]
-mode3d = 'external'
+# mode3d = 'external'
+chosen_jts = []

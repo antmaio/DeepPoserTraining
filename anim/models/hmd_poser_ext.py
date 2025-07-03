@@ -428,8 +428,9 @@ class HMDPoserExt(base.BaseModel):
         #logging.info('3x3 min max : ', body_pose_3x3_pred.max(), body_pose_3x3_pred.min())
 
         #TODO remove (just for debug purpose)
-        body_pose_3x3_pred[:,:,SmplxJoints.LEFT_FOOT-1] = torch.abs(body_pose_3x3_pred[:,:,SmplxJoints.LEFT_FOOT-1]) 
-        body_pose_3x3_pred[:,:,SmplxJoints.RIGHT_FOOT-1]= torch.abs(body_pose_3x3_pred[:,:,SmplxJoints.RIGHT_FOOT-1])
+        if not self.training:
+            body_pose_3x3_pred[:,:,SmplxJoints.LEFT_FOOT-1] = torch.abs(body_pose_3x3_pred[:,:,SmplxJoints.LEFT_FOOT-1]) 
+            body_pose_3x3_pred[:,:,SmplxJoints.RIGHT_FOOT-1]= torch.abs(body_pose_3x3_pred[:,:,SmplxJoints.RIGHT_FOOT-1])
 
         global_orient_aa_pred = matrix_to_angle_axis(global_orient_3x3_pred)
         body_pose_aa_pred = matrix_to_angle_axis(body_pose_3x3_pred)
