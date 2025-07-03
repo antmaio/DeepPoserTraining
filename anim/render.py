@@ -18,7 +18,9 @@ from anim.models.base import BaseModel
 from human_body_prior.body_model.body_model import BodyModel
 from utils.utils_transform import matrix_to_angle_axis, two_axis_to_matrix
 
-def basemodel2vertices(model_base:BaseModel, bm:BodyModel)->torch.Tensor:
+os.environ['PYOPENGL_PLATFORM'] = 'egl'
+
+def get_vertices_and_faces(model_base:BaseModel, bm:BodyModel)->torch.Tensor:
 
     global_orient_aa = matrix_to_angle_axis(model_base.global_orient)
     body_pose_aa = matrix_to_angle_axis(model_base.body_pose)
@@ -28,7 +30,7 @@ def basemodel2vertices(model_base:BaseModel, bm:BodyModel)->torch.Tensor:
         'root_orient' : global_orient_aa.view(num_frames, -1)
     }
     body_pose_local= bm(**{k:v for k, v in body_parms.items() if k in ['pose_body', 'root_orient']})
-    print('Vertices shape : ', body_pose_local.v.shape)
+    return body_pose_local.v, body_pose_local.f
 
 def __main():
     _ = torch.autograd.set_grad_enabled(False)
@@ -90,6 +92,7 @@ def __main():
         raise NotImplementedError(f"Unknown dataset: {dataset_str}")
 
 
+    body_parms_list = batch['body_parms_list']
     max_num_frames = batch['rotations_local_full_gt_list'].shape[0]
     if (num_frames <= 0) or (num_frames > max_num_frames):
         num_frames = max_num_frames
@@ -104,26 +107,23 @@ def __main():
     batch['gender'] = batch['gender'][None]
     batch['keypoints'] = batch['keypoints'][None, :num_frames]
     batch['conf'] = batch['conf'][None, :num_frames]
-
-    bm_male = BodyModel(bm_fname=bm_C._BM_FNAME_MALE_, num_betas=bm_C._NUM_BETAS_, num_dmpls=bm_C._NUM_DMPLS_, dmpl_fname=bm_C._DMPL_FNAME_MALE_)
-    bm_female = BodyModel(bm_fname=bm_C._BM_FNAME_MALE_, num_betas=bm_C._NUM_BETAS_, num_dmpls=bm_C._NUM_DMPLS_, dmpl_fname=bm_C._DMPL_FNAME_FEMALE_)
+     
+    bm_male = BodyModel(bm_fname=bm_C._BM_FNAME_MALE_, num_betas=bm_C._NUM_BETAS_, num_dmpls=bm_C._NUM_DMPLS_, dmpl_fname=bm_C._DMPL_FNAME_MALE_).to(device)
+    bm_female = BodyModel(bm_fname=bm_C._BM_FNAME_MALE_, num_betas=bm_C._NUM_BETAS_, num_dmpls=bm_C._NUM_DMPLS_, dmpl_fname=bm_C._DMPL_FNAME_FEMALE_).to(device)
 
     # Inference and process output and target
     model_input, model_target = models.batch_to_model_input_and_target(batch, device, dtype, mode3d=model.mode3d)
     model_pred = model(model_input)  # no 'reset' needed
     bm = bm_male if model_input.gender == amass.Gender.MALE else bm_female
     #Pred 
-    basemodel2vertices(model_pred, bm)
-    assert False
-
+    vertices_pred, faces_pred = get_vertices_and_faces(model_pred, bm)
     #Target
-    basemodel2vertices(model_target, bm)
-        
-
-    vertices_target_np = model_target.vertices[0].cpu().numpy()
-    vertices_pred_np = model_pred.vertices[0].cpu().numpy()
-    faces_target = model_target.faces
-    faces_pred = model_pred.faces
+    vertices_target, faces_target = get_vertices_and_faces(model_target, bm)
+    
+    vertices_target_np = vertices_target.cpu().numpy()
+    vertices_pred_np = vertices_pred.cpu().numpy()
+    faces_target = faces_target.cpu().numpy()
+    faces_pred = faces_pred.cpu().numpy()
 
     fourcc = 0x7634706d  # mp4v
     fps = amass.FPS
@@ -146,7 +146,9 @@ def __main():
         video_height = egobody.COLOR_HEIGHT
     else:
         camera = pyrender.PerspectiveCamera(np.deg2rad(60.0))
-        transl_target = model_target.transl[0]
+        #transl_target = model_target.transl[0]
+        #TODO fix camera_pose
+        transl_target = body_parms_list['trans']      
         transl_target_avg_np = transl_target.cpu().numpy().mean(axis=0)
         camera_pose = np.eye(4)
         camera_pose[:3, 3] = transl_target_avg_np
