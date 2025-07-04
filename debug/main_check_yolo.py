@@ -15,7 +15,7 @@ from PIL import Image
 from human_body_prior.body_model.body_model import BodyModel
 from body_visualizer.tools.vis_tools import colors
 from debug.rendering import init_mesh_viewer, extract_from_xml, world2im, triangulate, plot3d
-from debug.yolo_utils import init_yolo
+from debug.yolo_utils import init_yolo, run_yolo
 
 def __main():
 
@@ -47,8 +47,6 @@ def __main():
     # 
     # --- Init YOLO ---
     yolo_model = init_yolo(f'{yolo_model}.pt',)
-
-    
     
     #
     # --- Get motion ---
@@ -86,19 +84,52 @@ def __main():
         'pose_body': torch.tensor(bdata_poses[:, 3:66], device=device, dtype=torch.float32),
         'trans': torch.tensor(bdata_trans, device=device, dtype=torch.float32),
     }
+
+    
+    body_pose_world = bm(**{k:v for k,v in body_parms.items() if k in ['pose_body','root_orient','trans']})
+    #ground truth in coco format
+    jreg_path = os.path.join('debug', 'J_regressor_coco.npy') 
+    jregressor = torch.tensor(np.load(jreg_path), dtype=body_pose_world.v.dtype, device=device)
+    joints_coco = torch.einsum('bik,ji->bjk', [body_pose_world.v, jregressor])
+    positions_gt = joints_coco[frame_to_render].cpu().numpy()
+    
+    camera_files = [c for c in glob.glob(os.path.join("virtual_cameras", "*.xml")) if os.path.basename(c) in available_cameras]
     
     mv = init_mesh_viewer(camera_path = os.path.join('virtual_cameras'))  
 
-    vcam_kp, confidences = run_yolo(
-        yolo_model=yolo_model, 
-        mv=mv, 
-        bm=bm, 
-        body_pose_world=body_pose_world,
-        nb_frames=num_frames, 
-        orig_file=filepath, 
-        frame_path=dst, 
-        idx=idx
+    camera_poses = []
+    Ks = []
+
+    for camera_file in camera_files:
+        #get camera param for projection
+        K, camera_pose, size = extract_from_xml(camera_file)
+        camera_pose = np.vstack((camera_pose, [0, 0, 0, 1]))
+        camera_poses.append(camera_pose)
+        Ks.append(K)
+
+    vcam_kp = run_yolo(
+            yolo_model=yolo_model, 
+            mv=mv, 
+            bm=bm, 
+            body_pose_world=body_pose_world,
+            frame_to_render=frame_to_render,
+            nb_frames=1,
+            camera_files=camera_files
+        )
+
+    vcam_kp = np.vstack(vcam_kp)
+    
+    positions_triang = triangulate(
+        Ks=Ks, 
+        camera_poses=camera_poses, 
+        yolo_keypoints=vcam_kp, 
+        image_sizes=size,
+        mv=mv
     )
+
+    positions_triang = np.vstack(positions_triang)
+
+    plot3d(positions_gt=positions_gt, positions_triang=positions_triang)
 
 if __name__ == '__main__':
     __main()
