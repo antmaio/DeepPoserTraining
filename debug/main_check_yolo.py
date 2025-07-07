@@ -2,6 +2,7 @@ import os
 os.environ['PYOPENGL_PLATFORM'] = 'egl'
 import numpy as np
 import torch
+import logging
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -16,6 +17,14 @@ from human_body_prior.body_model.body_model import BodyModel
 from body_visualizer.tools.vis_tools import colors
 from debug.rendering import init_mesh_viewer, extract_from_xml, world2im, triangulate, plot3d
 from debug.yolo_utils import init_yolo, run_yolo
+
+
+
+# Overwrite log file every time the script runs
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 
 def __main():
 
@@ -88,14 +97,14 @@ def __main():
     
     body_pose_world = bm(**{k:v for k,v in body_parms.items() if k in ['pose_body','root_orient','trans']})
     #ground truth in coco format
-    jreg_path = os.path.join('debug', 'J_regressor_coco.npy') 
+    jreg_path = os.path.join('data', 'J_regressor_coco.npy') 
     jregressor = torch.tensor(np.load(jreg_path), dtype=body_pose_world.v.dtype, device=device)
     joints_coco = torch.einsum('bik,ji->bjk', [body_pose_world.v, jregressor])
     positions_gt = joints_coco[frame_to_render].cpu().numpy()
     
-    camera_files = [c for c in glob.glob(os.path.join("virtual_cameras", "*.xml")) if os.path.basename(c) in available_cameras]
+    camera_files = [c for c in glob.glob(os.path.join("data", "virtual_cameras", "*.xml")) if os.path.basename(c) in available_cameras]
     
-    mv = init_mesh_viewer(camera_path = os.path.join('virtual_cameras'))  
+    mv = init_mesh_viewer(camera_path = os.path.join("data", 'virtual_cameras'))  
 
     camera_poses = []
     Ks = []

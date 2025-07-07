@@ -3,6 +3,7 @@ import pyrender
 from pyrender import Viewer
 from psbody.mesh import Mesh
 import sys
+import logging
 import numpy as np
 import torch
 import os
@@ -174,8 +175,6 @@ class MeshViewer2(MeshViewer):
         camera_pose = np.eye(4)
         camera_pose[:3, 3] = np.array([0, 0, 3.0])
         self.camera_node = self.scene.add(pc, pose=camera_pose, name='pc-camera')
-
-        
 
         self.figsize = (width, height)
 
@@ -436,7 +435,6 @@ def triangulate(
     camera_poses:np.ndarray, 
     image_sizes:Tuple[int, int], 
     yolo_keypoints:np.ndarray,
-    joint_id:int,
     mv:MeshViewer2
 ):
     
@@ -454,8 +452,6 @@ def triangulate(
     yolo_keypoints : torch.Tensor
         Dictionary-like object containing 2D keypoints for each camera
         with keys like 'vcam0' and values of shape (nframes, njoints, 2)
-    joint_id : int
-        Joint index to triangulate
 
     Returns
     -------

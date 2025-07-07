@@ -6,6 +6,7 @@ import os
 import numpy as np
 import trimesh
 import ultralytics
+import re
 #Internal
 from body_visualizer.tools.vis_tools import colors
 from human_body_prior.tools.omni_tools import copy2cpu as c2c
@@ -244,6 +245,15 @@ def get_keypoints(fId:int, mv:MeshViewer2, model, body_pose_hand, faces, frame_p
 
     # Get all camera XML files (any naming pattern)
     camera_files = glob.glob(os.path.join(CAMERA_PATH, '*.xml'))
+    
+    # Ensure sorted list of camera_files
+    def get_cam_id(path):
+        filename = os.path.basename(path)
+        _match = re.search(r'Camera_(\d+)\.xml', filename)
+        return int(_match.group(1)) if _match else float('inf')
+
+    camera_files.sort(key=get_cam_id) 
+
     for camera_file in camera_files:
         K, camera_pose, _ = extract_from_xml(camera_file)
         camera_pose = np.vstack((camera_pose, [0, 0, 0, 1]))
