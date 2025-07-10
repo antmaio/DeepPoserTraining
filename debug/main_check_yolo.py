@@ -18,8 +18,6 @@ from body_visualizer.tools.vis_tools import colors
 from debug.rendering import init_mesh_viewer, extract_from_xml, world2im, triangulate, plot3d
 from debug.yolo_utils import init_yolo, run_yolo
 
-
-
 # Overwrite log file every time the script runs
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',

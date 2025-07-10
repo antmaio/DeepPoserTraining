@@ -1,21 +1,20 @@
 """
 Inspired by https://github.com/zxz267/AvatarJLM
 """
-
+#External
 import numpy as np 
 import torch
 import os
 import glob
 import pickle
-
-from utils import utils_transform
 from sklearn.cluster import DBSCAN
+#Internal
 from human_body_prior.tools.rotation_tools import aa2matrot, local2global_pose
-
 from data.yolo_data_gen import run_yolo
 from data.rendering import init_mesh_viewer
 from data.data_config import SMPL_JOINTS
-
+from data.utils_mmpose import _MODEL_STR_
+from utils import utils_transform
 
 DISCARD_TERRAIN_SEQUENCES = True # throw away sequences where the person steps onto objects (determined by a heuristic)
 DISCARD_SHORTER_THAN = 1.0 # seconds
@@ -185,7 +184,7 @@ def syn_acc(v, smooth_n=4):
              for i in range(0, v.shape[0] - smooth_n * 2)])
     return acc
 
-def process(src, dst, body_models, logging, split_file=None, yolo_model=None):
+def process(src, dst, body_models, logging, split_file=None, **kwargs):
     assert src and dst
     
     rotation_local_full_gt_list = []
@@ -207,10 +206,9 @@ def process(src, dst, body_models, logging, split_file=None, yolo_model=None):
             logging.info(f'File {os.path.join(dst, f"{idx}.pkl")} exists')
             continue
 
-
         #Init dict
         data = dict()
-        data['yolo_keypoints'] = dict()
+        data['pose_estimation_keypoints'] = dict()
 
         bdata = np.load(filepath, allow_pickle=True)
         try:
@@ -291,37 +289,42 @@ def process(src, dst, body_models, logging, split_file=None, yolo_model=None):
                                                                 position_global_full_gt_world[1:, :22, :].reshape(num_frames,-1)-position_global_full_gt_world[:-1, :22, :].reshape(num_frames,-1)], dim=-1)
         #print(str(idx), framerate, src, len(all_file), bdata["poses"].shape[0], hmd_position_global_full_gt_list.shape)
 
-        # -----------------------------------------------Cameras projection----------------------------------------------
+        # -----------------------------------------------Cameras projection if required ----------------------------------------------
+        yolo_model = kwargs.get('yolo_model')
+        yolo_model_str = kwargs.get('yolo_model_str')
+        mm_pose_model = kwargs.get('mm_pose_model')
+
+        if yolo_model or mm_pose_model:
+
+            vcam_kp, confidences = run_yolo( 
+                mv=MV, 
+                bm=body_model, 
+                body_pose_world=body_pose_world,
+                nb_frames=num_frames, 
+                orig_file=filepath, 
+                frame_path=dst, 
+                idx=idx,
+                **kwargs
+            )
         
+            if mm_pose_model:  
+                pose_estimation_keypoints = {'model_version': f'{_MODEL_STR_}'} 
+            elif yolo_model: 
+                pose_estimation_keypoints = {'model_version': f'{yolo_model_str}'}
 
-        vcam_kp, confidences = run_yolo(
-            yolo_model=yolo_model, 
-            mv=MV, 
-            bm=body_model, 
-            body_pose_world=body_pose_world,
-            nb_frames=num_frames, 
-            orig_file=filepath, 
-            frame_path=dst, 
-            idx=idx
-        )
-        
+            pose_estimation_keypoints['conf'] = torch.Tensor(confidences[1:])
+            # Add each camera's keypoints dynamically
+            for cam_idx in range(len(vcam_kp)):
+                cam_key = f'vcam{cam_idx}'  # Creates keys like 'vcam0', 'vcam1', etc.
+                pose_estimation_keypoints[cam_key] = torch.Tensor(vcam_kp[cam_idx][1:])  # num_frames x 17 x 2
 
-        yolo_keypoints = {'yolo_version': f'{yolo_model}.pt',
-            'conf': torch.Tensor(confidences[1:]) #num_frames x 17 x 2
-        }  
-        # Add each camera's keypoints dynamically
-        for cam_idx in range(len(vcam_kp)):
-            cam_key = f'vcam{cam_idx}'  # Creates keys like 'vcam0', 'vcam1', etc.
-            yolo_keypoints[cam_key] = torch.Tensor(vcam_kp[cam_idx][1:])  # num_frames x 17 x 2
+            # dict udpate            
+            data['pose_estimation_keypoints']['model_version'] =  pose_estimation_keypoints['model_version']
+            data['pose_estimation_keypoints']['confidences'] = pose_estimation_keypoints['conf']
+            data['pose_estimation_keypoints']['ground_truth'] = joints_coco[1:]
+            for cam_key in [k for k in pose_estimation_keypoints.keys() if k.startswith('vcam')]:
+                data['pose_estimation_keypoints'][cam_key] = pose_estimation_keypoints[cam_key]
 
-        # dict udpate            
-        data['yolo_keypoints']['yolo_version'] =  yolo_keypoints['yolo_version']
-        data['yolo_keypoints']['confidences'] = yolo_keypoints['conf']
-        data['yolo_keypoints']['ground_truth'] = joints_coco[1:]
-        for cam_key in [k for k in yolo_keypoints.keys() if k.startswith('vcam')]:
-            data['yolo_keypoints'][cam_key] = yolo_keypoints[cam_key]
-
-        # ---------------------------------------------------------------------------------------------
         body_parms_list = {k: v[1:].cpu() for k, v in body_parms_list.items()}
 
         data['rotation_local_full_gt_list'] = rotation_local_full_gt_list.cpu()
@@ -337,7 +340,8 @@ def process(src, dst, body_models, logging, split_file=None, yolo_model=None):
         data['offset_floor_height'] = offset_floor_height
         data['contacts'] = contacts[1:]
 
+
+        # --- Save data preprocessed into pkl files ---
         logging.info(f'File saved at {os.path.join(dst, f"{idx}.pkl")}')
         with open(os.path.join(dst, '{}.pkl'.format(idx)), 'wb') as f:
             pickle.dump(data, f)
-

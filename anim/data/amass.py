@@ -100,8 +100,9 @@ def get_protocol1_relative_recording_paths(use_cmu: bool = True, use_hdm05: bool
     return  list(data_dir.glob('*/*/**/*.pkl'))
 
 def get_protocol1_split_relative_paths(split:str, verbose:bool=True)-> Tuple:
-    assert split in ('train', 'test')
+    assert split in ('train', 'valid', 'test')
     data_dir = pathlib.Path(config.DATA_DIR)
+    split = 'test' if split == 'valid' else split #take test dataset as validation, but segmented of by chunks of size win_len
     return list(data_dir.glob(f"*/{split}/**/*.pkl"))
 
 def load_gt(relative_rec_path:str, fps:int=60):
@@ -160,6 +161,8 @@ def get_dataset(dataset_str: str, split: str, ratio: float = None, **dataset_arg
     return dataset
 
 def load_smpl(relative_rec_path: Union[str, pathlib.Path]) -> dict:
+
+    #only used to load test data 
 
     os.makedirs(__CACHE_DIR, exist_ok=True)
 

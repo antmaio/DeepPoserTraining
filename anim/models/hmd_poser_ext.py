@@ -7,7 +7,8 @@ Inspired from https://github.com/georgedf1/sfbpe/tree/main
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
-from torch.nn.utils.parametrizations import weight_norm
+#from torch.nn.utils.parametrizations import weight_norm #pytorch 2.3.1
+from torch.nn.utils import weight_norm #pytorch 2.0.1
 import logging
 
 # Internal

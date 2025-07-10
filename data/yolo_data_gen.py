@@ -7,6 +7,8 @@ import numpy as np
 import trimesh
 import ultralytics
 import re
+from PIL import Image
+
 #Internal
 from body_visualizer.tools.vis_tools import colors
 from human_body_prior.tools.omni_tools import copy2cpu as c2c
@@ -14,7 +16,9 @@ from data.rendering import CheckerBoard,MeshViewer2
 from data.data_config import YoloJoints
 from data.camera_config import CAMERA_PATH
 from human_body_prior.body_model.body_model import BodyModel
-from data.utils_yolo import visualize_yolo_results
+#from data.utils_yolo import visualize_yolo_results
+#from data.utils_mmpose import visualize_mmpose_results
+
 
 import os
 os.environ['PYOPENGL_PLATFORM'] = 'egl'
@@ -91,7 +95,7 @@ def projection(data3d, ex_params, intr_params):
     return data2d
 '''
 
-""" Rendering """
+""" Rendering Debug """
 def generate_checker_mesh():
     generator = CheckerBoard()
     checker = generator.gen_checker_xy(generator.black, generator.white)
@@ -174,65 +178,81 @@ def generate_new_scene_pov(mv, K):
     
     mv.updateCam(pov_pose, K)
     return mv
+
+def save_body_image(body_image):
+    image = Image.fromarray(body_image)
+    image.save('body_image_cam_1.png')
+
+""" Pose estimation """
+def inference(body_image, frame_path, fId, orig_file, **kwargs):
+
+    yolo_model  = kwargs.get('yolo_model') #pose estimation from ultralytics
+    inferencer  = kwargs.get('mm_pose_model') #pose estimation from mmpose
+    topology    = kwargs.get('topology')
+
+    ret = []
+    conf = []
+    #save_body_image(body_image)
     
-def extract_from_xml(file_path):
-    # Parse the XML file using ElementTree and get the root element
-    tree = ET.parse(file_path)
-    root = tree.getroot()
+    # --- Pose Estimation with Yolo model --- 
+    if yolo_model:
 
-    # Find the 'Intrinsics' element in the XML and extract the 'data' text
-    intrinsics = root.find('Intrinsics')
-    data_text = intrinsics.find('data').text
-    # Split the text into lines and convert each line into a list of floats
-    K = np.array([list(map(float, line.split())) for line in data_text.strip().split('\n')])
+        results = yolo_model.predict(body_image, device=0, verbose=False, stream=True)
 
-    # Find the 'CameraMatrix' element in the XML and extract the 'data' text
-    extrinsics = root.find('CameraMatrix')
-    data_text = extrinsics.find('data').text
+        for res in results:
+        
+            if len(res) > 0:
+                ret.append(res[0].keypoints.data.cpu().numpy())
+                conf.append(res[0].keypoints.conf.cpu().numpy())
+                #visualize_yolo_results(res, cam, fId)
 
-    # Split the text into lines and convert each line into a list of floats
-    camera_pose = np.array([list(map(float, line.split())) for line in data_text.strip().split('\n')])
+            else:
+                save_bad_frame(frame_path, fId, orig_file)
+                ret.append(np.zeros((1, topology.NUM_JTS, 2), dtype=float))
+                conf.append(np.zeros((1, topology.NUM_JTS), dtype=float))
+ 
+        return ret, conf
 
-    #Imae size
-    image_width = int(root.find('image_width').text)
-    image_height = int(root.find('image_height').text)
-    image_size = (image_width, image_height)
-    
-    return K, camera_pose, image_size
+    # --- Pose Estimation with model from mmpose --- 
+    elif inferencer:
 
-def save_bad_frame(frame_path, fId, orig_file):
+        result_generator = inferencer(body_image, show=False)
+        results = next(result_generator)
 
-    with open(f'./yolo_bad_frames.txt', 'a') as txtfile:
-        txtfile.write(f'{orig_file} {frame_path} {fId}\n')
-    return
+        if len(results['predictions']) > 0: #if pose on image
+            predictions_mmpose = results['predictions'][0][0] # first image - first prediction
+            keypoints = np.expand_dims(np.array(predictions_mmpose['keypoints']), axis=0)
+            keypoint_scores = np.expand_dims(np.array(predictions_mmpose['keypoint_scores']), axis=0)
+            ret.append(keypoints)
+            conf.append(keypoint_scores)
 
-def get_keypoints_by_cam(mv, model, cam, fId, frame_path, orig_file, im):
+        else:
+            save_bad_frame(frame_path, fId, orig_file)
+            ret.append(np.zeros((1, topology.NUM_JTS, 2), dtype=float))
+            conf.append(np.zeros((1, topology.NUM_JTS), dtype=float))
+
+        del result_generator #save memory
+
+        return ret, conf
+
+
+def get_keypoints_by_cam(mv, cam, fId, frame_path, orig_file, im, **kwargs):
 
     KMat = mv.viewer._renderer._get_camera_matrices(mv.scene)
     PMat = mv.get_projection_matrix()
     body_image = mv.render(render_wireframe=False)
 
-    results = model.predict(body_image, device=0, verbose=False, stream=True)
-
-    ret = []
-    conf = []
-    for res in results:
-        # Save yolo image
-        
-        if len(res) > 0:
-            ret.append(res[0].keypoints.data.cpu().numpy())
-            conf.append(res[0].keypoints.conf.cpu().numpy())
-            #visualize_yolo_results(res, cam, fId)
-
-        else:
-            save_bad_frame(frame_path, fId, orig_file)
-            ret.append(np.zeros((1, YoloJoints.NUM_JTS, 3), dtype=float))
-            conf.append(np.zeros((1, YoloJoints.NUM_JTS), dtype=float))
+    ret, conf = inference( 
+        body_image  = body_image,
+        frame_path  = frame_path,
+        fId         = fId,
+        orig_file   = orig_file,
+        **kwargs    
+    )
 
     return ret, conf, KMat, PMat
 
-
-def get_keypoints(fId:int, mv:MeshViewer2, model, body_pose_hand, faces, frame_path, orig_file):
+def get_keypoints(fId:int, mv:MeshViewer2, body_pose_hand, faces, frame_path, orig_file, **kwargs):
     ret = []
     confs = []
     KMatCont = []
@@ -263,12 +283,13 @@ def get_keypoints(fId:int, mv:MeshViewer2, model, body_pose_hand, faces, frame_p
         im=None
 
         results, confidences, KMat, PMat = get_keypoints_by_cam(mv=mv, 
-            model=model, 
+            #model=model, 
             cam=cam, 
             fId=fId,
             frame_path=frame_path, 
             orig_file=orig_file, 
-            im=im
+            im=im,
+            **kwargs
         )
 
         KMatCont.append(KMat)
@@ -280,15 +301,16 @@ def get_keypoints(fId:int, mv:MeshViewer2, model, body_pose_hand, faces, frame_p
     return ret, confs, KMatCont, PMatCont
 
 def run_yolo(
-        yolo_model:ultralytics.models.yolo.model.YOLO, 
         mv:MeshViewer2, 
         bm:BodyModel, 
         body_pose_world, 
         nb_frames:int, 
         orig_file:str, 
         frame_path:str, 
-        idx:int
+        idx:int,
+        **kwargs
     ):
+
     # Choose the device to run the body model on.
     comp_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(comp_device)
@@ -308,11 +330,12 @@ def run_yolo(
 
         keyPoints, conf, _, _ = get_keypoints(fId=frameId,
             mv=mv, 
-            model=yolo_model, 
+            #model=yolo_model, 
             body_pose_hand=body_pose_world,
             faces=faces, 
             frame_path=frame_path_id, 
-            orig_file=orig_file
+            orig_file=orig_file,
+            **kwargs
         )
 
         # Store confidences (assuming same across cameras or needs processing)
@@ -334,3 +357,35 @@ def run_yolo(
     cam_2d_arrays = [np.array(cam_data) for cam_data in cam_2d]
 
     return cam_2d_arrays, Confidences
+
+""" Utils functions """    
+def extract_from_xml(file_path):
+    # Parse the XML file using ElementTree and get the root element
+    tree = ET.parse(file_path)
+    root = tree.getroot()
+
+    # Find the 'Intrinsics' element in the XML and extract the 'data' text
+    intrinsics = root.find('Intrinsics')
+    data_text = intrinsics.find('data').text
+    # Split the text into lines and convert each line into a list of floats
+    K = np.array([list(map(float, line.split())) for line in data_text.strip().split('\n')])
+
+    # Find the 'CameraMatrix' element in the XML and extract the 'data' text
+    extrinsics = root.find('CameraMatrix')
+    data_text = extrinsics.find('data').text
+
+    # Split the text into lines and convert each line into a list of floats
+    camera_pose = np.array([list(map(float, line.split())) for line in data_text.strip().split('\n')])
+
+    #Imae size
+    image_width = int(root.find('image_width').text)
+    image_height = int(root.find('image_height').text)
+    image_size = (image_width, image_height)
+    
+    return K, camera_pose, image_size
+
+def save_bad_frame(frame_path, fId, orig_file):
+
+    with open(f'./yolo_bad_frames.txt', 'a') as txtfile:
+        txtfile.write(f'{orig_file} {frame_path} {fId}\n')
+    return

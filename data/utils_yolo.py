@@ -1,8 +1,12 @@
 #External
 from PIL import Image
 import os
+import numpy as np
 from ultralytics import YOLO
 import torch
+#Internal
+from data.data_config import YoloJoints
+from data.yolo_data_gen import save_bad_frame
 
 def visualize_yolo_results(res, cam:str)->None:
     annotated_frame = res[0].plot()
@@ -16,5 +20,6 @@ def init_yolo(yolo_model:str='yolov8x-pose.pt'):
     model.to(0)
     # Perform object detection on an image using the model
     print('cuda:', torch.cuda.is_available())
-
     return model
+
+

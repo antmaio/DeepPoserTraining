@@ -100,7 +100,7 @@ def __main():
     # --- Dataset preparation ---
     train_dataset = amass.get_dataset(args.dataset, 'train', args.data_ratio,
                                      win_len=args.win_len, win_overlap=args.win_overlap, zero_betas=args.zero_betas, dtype=dtype)
-    val_dataset = amass.get_dataset(args.dataset, 'test', args.data_ratio,
+    val_dataset = amass.get_dataset(args.dataset, 'valid', args.data_ratio,
                                    win_len=args.win_len, win_overlap=args.win_overlap, zero_betas=args.zero_betas, dtype=dtype)
     # Need drop last due to loss averaging (fixed batch size)
     train_dataloader = DataLoader(train_dataset, args.batch_size,

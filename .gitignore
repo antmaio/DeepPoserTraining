@@ -17,6 +17,9 @@ yolo_bad_frames.txt
 saves/
 temp/
 renders/
+data/mmpose_models/
+mmpose_output/
 
 pose_lifter/J_regressor_coco.npy
 _debug.py
+_debug_mmpose.py

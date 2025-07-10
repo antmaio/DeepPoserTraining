@@ -74,7 +74,6 @@ class MeshViewer2(MeshViewer):
             if node.name is not None and 'mesh' in node.name:
                 self.scene.remove_node(node)
 
-
 def animate_2d_keypoints(yolo_keypoints: dict, 
                         cam_keys_for_triang: List[str], 
                         output_dir: str = "./",
@@ -348,10 +347,11 @@ def __main():
     parse.add_argument('--dataroot', default='./data/keypoints/yolov8n-pose_protocol_1', type=str, help='Path to pkl files')
     args = parse.parse_args()
     
+    assert args.dataset_type in ('amass_p1', 'amass_p2'), f"{args.dataset_type} not supported for --dataset_type"
+
     # Get all camera XML files (any naming pattern)
     camera_files = glob.glob(os.path.join(CAMERA_PATH, '*.xml'))
 
-    
     # meshviewer for cam update  
     mv = set_mesh_viewer(camera_files)
 
@@ -378,9 +378,12 @@ def __main():
             with open(filename, 'rb') as f:
                 data = pickle.load(f)
         
-            yolo_keypoints = data['yolo_keypoints']
+            #'yolo' in data.keys() in a previous version of OpenMPLPoser
+            key = 'yolo_keypoints' if any('yolo' in _key for _key in data.keys()) else 'pose_estimation_keypoints'
 
-            confidences = yolo_keypoints['confidences']
+            pose_estimation_keypoints = data[key]
+
+            confidences = pose_estimation_keypoints['confidences']
             nframes, njoints, _ = confidences.shape
                     
             # Get the indices of the top-2 cameras with highest confidence per joint
@@ -400,7 +403,7 @@ def __main():
                     point3d = triangulate(
                         Ks=Ks, 
                         camera_poses=camera_poses, 
-                        yolo_keypoints=yolo_keypoints, 
+                        yolo_keypoints=pose_estimation_keypoints, 
                         cam_keys_for_triang=cam_keys_for_triang,
                         image_sizes=image_sizes,
                         frame_id=f,
