@@ -8,10 +8,10 @@
 *.png
 *.job
 *.txt
+*.json
 
 data/keypoints/
 data/__pycache__/
-pose_lifter/animate.py
 yolo_bad_frames.txt
 .cache
 saves/
@@ -19,7 +19,11 @@ temp/
 renders/
 data/mmpose_models/
 mmpose_output/
+pretrained/
+
+pose_lifter/openmpl.py
+pose_lifter/animate.py
 
 pose_lifter/J_regressor_coco.npy
-_debug.py
-_debug_mmpose.py
+
+_*.py

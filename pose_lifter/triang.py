@@ -345,6 +345,7 @@ def __main():
     parse = argparse.ArgumentParser()
     parse.add_argument('--dataset_type', default='amass_p1', type=str, help="Dataset split as in AvatarJLM")
     parse.add_argument('--dataroot', default='./data/keypoints/yolov8n-pose_protocol_1', type=str, help='Path to pkl files')
+    parse.add_argument('--output_dir', default='triang', type=str, help='relative output path to 3D keypoints')
     args = parse.parse_args()
     
     assert args.dataset_type in ('amass_p1', 'amass_p2'), f"{args.dataset_type} not supported for --dataset_type"
@@ -370,6 +371,12 @@ def __main():
         
         print('-------------------------------number of {} data is {}'.format(phase, len(filename_list)))
     
+        # create .../triang
+        if len(filename_list) > 0:
+            input_dir = os.path.dirname(filename_list[0])
+            output_dir = os.path.join(input_dir, args.output_dir)
+            os.makedirs(output_dir, exist_ok=True)
+
         for filename in filename_list:
             if os.path.exists(f'{os.path.splitext(filename)[0]}.npz'):
                 print(f'{os.path.splitext(filename)[0]}.npz already exists!')
@@ -412,9 +419,11 @@ def __main():
                     )
 
                     points3d[f, j] = point3d
-                    
-            np.savez(os.path.splitext(filename)[0] + ".npz", points3d=points3d, conf=top2_conf)
-            logging.info(f'{os.path.splitext(filename)[0]}.npz succesfully saved!')
+
+            base_name = os.path.splitext(os.path.basename(filename))[0] + ".npz"
+            output_path = os.path.join(output_dir, base_name)
+            np.savez(output_path, points3d=points3d, conf=top2_conf)
+            logging.info(f'{output_path}.npz succesfully saved!')
 
 
 if __name__ == '__main__':
