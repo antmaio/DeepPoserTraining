@@ -132,7 +132,7 @@ def __main():
     parser.add_argument('--win_len', type=int, default=40)
     parser.add_argument('--checkpoint', type=int, default=None)
     parser.add_argument('--model_device_str', type=str, default='cuda')
-    parser.add_argument('--compile_mode', type=str, default=None, choices=__COMPILE_MODE__)
+    parser.add_argument('--compile_mode' , type=str, default=None, choices=__COMPILE_MODE__)
     args = parser.parse_args()
     
     model_dir = args.model_dir

@@ -14,6 +14,7 @@ import pyrender
 from pyrender import Viewer
 import logging
 import copy
+from pathlib import Path
 
 logging.basicConfig(
     level=logging.INFO,
@@ -321,6 +322,15 @@ def get_cam_params_from_key(key: List[str], camera_files:List[str])->Tuple[List[
         image_sizes.append(image_size)
     return Ks, camera_poses, image_sizes
 
+def check_if_shape_matches(points3d, pkl_filename:str):
+    with open(pkl_filename, 'rb') as f:
+        data = pickle.load(f)
+    key = 'yolo_keypoints' if any('yolo' in _key for _key in data.keys()) else 'pose_estimation_keypoints'
+    gt = data[key]['ground_truth']
+
+    assert gt.shape == points3d.shape, \
+        f"points3d and gt shapes do not match {points3d.shape} | {gt.shape}"
+
 def __main():
     """
     Main execution function for multi-view 3D pose triangulation.
@@ -362,7 +372,7 @@ def __main():
 
     for phase in phases:
         if dataset_type == 'amass_p1':
-            filename_list = glob.glob(f'./{dataroot}/*/{phase}/*.pkl')
+            filename_list = glob.glob(f'./{dataroot}/*/{phase}/preprocessed/*.pkl')
         elif dataset_type == 'amass_p2':
             if phase == 'train':
                 filename_list = glob.glob(f'./{dataroot}/MPI_HDM05/*/*.pkl') + glob.glob(f'./{dataroot}/BioMotionLab_NTroje/*/*.pkl')
@@ -374,39 +384,40 @@ def __main():
         # create .../triang
         if len(filename_list) > 0:
             input_dir = os.path.dirname(filename_list[0])
-            output_dir = os.path.join(input_dir, args.output_dir)
+            output_dir = os.path.join(str(input_dir).replace('/preprocessed', '/'), args.output_dir)
             os.makedirs(output_dir, exist_ok=True)
 
-        for filename in filename_list:
-            if os.path.exists(f'{os.path.splitext(filename)[0]}.npz'):
-                print(f'{os.path.splitext(filename)[0]}.npz already exists!')
+        for filename in sorted(filename_list):
+            # Construct output path
+            output_path = filename.replace("/preprocessed/", f"/{args.output_dir}/").replace(".pkl", ".npz")
+
+            # Skip if already exists
+            if os.path.exists(output_path):
+                logging.info(f"{output_path} already exists!")
                 continue
-            
+
             with open(filename, 'rb') as f:
+                logging.info(f'Loading file {filename}...')
                 data = pickle.load(f)
-        
-            #'yolo' in data.keys() in a previous version of OpenMPLPoser
+            
             key = 'yolo_keypoints' if any('yolo' in _key for _key in data.keys()) else 'pose_estimation_keypoints'
-
             pose_estimation_keypoints = data[key]
-
             confidences = pose_estimation_keypoints['confidences']
             nframes, njoints, _ = confidences.shape
-                    
-            # Get the indices of the top-2 cameras with highest confidence per joint
-            top2_conf, cams_max_conf = torch.topk(confidences, k=2, dim=-1)
 
-            # `cams_max_conf` now contains the camera IDs (0, 1, or 2) of the top-2 confidences
+            top2_conf, cams_max_conf = torch.topk(confidences, k=2, dim=-1)
+            print(top2_conf.shape)
+            print(top2_conf[:10,:2])
+            assert False
             points3d = np.zeros((nframes, njoints, 3))
+
+            check_if_shape_matches(points3d, filename)
 
             for f in range(nframes):
                 for j in range(njoints):
-                    cam_keys_for_triang = [f'vcam{k}' for k in cams_max_conf[f,j]]
-                    #animate_2d_keypoints(yolo_keypoints, cam_keys_for_triang, output_dir='./')
-
+                    cam_keys_for_triang = [f'vcam{k}' for k in cams_max_conf[f, j]]
                     Ks, camera_poses, image_sizes = get_cam_params_from_key(cam_keys_for_triang, camera_files)
-            
-                    #Get 3D world positions from 2D yolo keypoints 
+
                     point3d = triangulate(
                         Ks=Ks, 
                         camera_poses=camera_poses, 
@@ -417,13 +428,14 @@ def __main():
                         joint_id=j,
                         mv=mv
                     )
-
                     points3d[f, j] = point3d
 
-            base_name = os.path.splitext(os.path.basename(filename))[0] + ".npz"
-            output_path = os.path.join(output_dir, base_name)
+            check_if_shape_matches(points3d, filename)
+
+            # Save to the same output_path used earlier
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
             np.savez(output_path, points3d=points3d, conf=top2_conf)
-            logging.info(f'{output_path}.npz succesfully saved!')
+            logging.info(f'{output_path} successfully saved!')
 
 
 if __name__ == '__main__':

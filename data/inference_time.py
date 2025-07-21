@@ -9,10 +9,11 @@ import numpy as np
 import json
 import os
 import logging
+import typing
 #Internal
 from data.utils_mmpose import _MODEL_STR_
+from data.utils_yolo import init_yolo
 
-JSON_PATH = "inference_benchmarks.json"
 
 # Overwrite log file every time the script runs
 logging.basicConfig(
@@ -20,41 +21,101 @@ logging.basicConfig(
     level=logging.INFO
 )
 
+def inference_mmpose(model)->typing.List[float]:
+    
+    inferencer = MMPoseInferencer(model, device='cuda')
+    # Warm-up phase (10 runs)
+    for _ in range(10):
+        result_generator = inferencer('body_image_cam_1.png', show=False)
+        _ = next(result_generator)
+
+    # Timed inference phase (100 runs)
+    timings = []
+    for _ in range(100):
+        result_generator = inferencer('body_image_cam_1.png', show=False)
+
+        torch.cuda.synchronize()
+        start = time.time()
+        _ = next(result_generator)
+        torch.cuda.synchronize()
+        end = time.time()
+
+        timings.append(end - start)
+    
+    return timings
+
+def inference_yolo(model_str:str)->typing.List[float]:
+    
+    model = init_yolo(model_str+'.pt')
+    # Predict on a single image
+    results = model("body_image_cam_1.png")
+
+    # Warm-up phase (10 runs)
+    for _ in range(10):
+        results = model("body_image_cam_1.png")
+
+    # Timed inference phase (100 runs)
+    timings = []
+    for _ in range(100):
+
+        torch.cuda.synchronize()
+        start = time.time()
+        results = model("body_image_cam_1.png")
+        torch.cuda.synchronize()
+        end = time.time()
+
+        timings.append(end - start)
+    
+    return timings
+        
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--mm_pose_model', 
         type=str, 
-        nargs='+', 
+        nargs='*', 
         default=None,
         help='One or more model aliases, e.g.: td-hm_hrnet-w32_8xb64-210e_coco-256x192 or multiple models separated by space'
     )
+    parser.add_argument('--yolo_model',
+        type=str,
+        nargs='*',
+        default=None,
+        help='One or more model aliases, e.g.: yolov8n-pose or multiple models separated by space'
+    )
+    parser.add_argument('--json_filename', type=str, default="inference_benchmarks")
     args = parser.parse_args()
 
-    # Your default model string if none is given
-    models = args.mm_pose_model if args.mm_pose_model is not None else [_MODEL_STR_]
+    # asserts
+    if (args.yolo_model is None and args.mm_pose_model is None) or \
+    (args.yolo_model is not None and args.mm_pose_model is not None):
+        parser.error('You must specify exactly one of --yolo_model or --mm_pose_model.')
+    assert args.json_filename is not None, f"please provide a valid json filename instead of {args.json_filename}"
 
+    # Your default model string if none is given
+    if args.mm_pose_model and len(args.mm_pose_model) == 0:
+        inference_func = inference_mmpose 
+        args.json_filename += "_mm"
+        models = [_MODEL_STR_]
+    elif args.mm_pose_model and len(args.mm_pose_model) > 0:
+        inference_func = inference_mmpose 
+        models = args.mm_pose_model    
+        args.json_filename += "_mm"
+    elif args.yolo_model is not None:
+        inference_func = inference_yolo
+        models = args.yolo_model
+        args.json_filename += "_yolo"
+    else:
+        raise ValueError('Check carefully args.yolo_model and args.mm_pose_model')
+
+    args.json_filename += '.json'
+    
+    
     for model in models:
         # Instantiate the inferencer
         try:
-            inferencer = MMPoseInferencer(model, device='cuda')
-            # Warm-up phase (10 runs)
-            for _ in range(10):
-                result_generator = inferencer('body_image_cam_1.png', show=False)
-                _ = next(result_generator)
 
-            # Timed inference phase (100 runs)
-            timings = []
-            for _ in range(100):
-                result_generator = inferencer('body_image_cam_1.png', show=False)
-
-                torch.cuda.synchronize()
-                start = time.time()
-                _ = next(result_generator)
-                torch.cuda.synchronize()
-                end = time.time()
-
-                timings.append(end - start)
+            timings = inference_func(model)
 
             # Compute stats
             avg_time = float(np.mean(timings))
@@ -64,8 +125,8 @@ def main():
             logging.info(f"✅ Std inference time: {std_time:.4f} seconds")
 
             # Load existing JSON
-            if os.path.exists(JSON_PATH):
-                with open(JSON_PATH, "r") as f:
+            if os.path.exists(args.json_filename):
+                with open(args.json_filename, "r") as f:
                     benchmark_data = json.load(f)
             else:
                 benchmark_data = {}
@@ -77,10 +138,10 @@ def main():
             }
 
             # Write back to file
-            with open(JSON_PATH, "w") as f:
+            with open(args.json_filename, "w") as f:
                 json.dump(benchmark_data, f, indent=4)
 
-            logging.info(f"✅ Results saved to {JSON_PATH}")
+            logging.info(f"✅ Results saved to {args.json_filename}")
 
         except:
             logging.info(f'Ignore data for {model}')

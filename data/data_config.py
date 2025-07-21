@@ -10,6 +10,8 @@ SMPL_JOINTS = {'hips' : 0, 'leftUpLeg' : 1, 'rightUpLeg' : 2, 'spine' : 3, 'left
                 'leftForeArm' : 18, 'rightForeArm' : 19, 'leftHand' : 20, 'rightHand' : 21}
 SMPL_PARENTS = [-1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 12, 12, 13, 14, 16, 17, 18, 19]
 
+FPS = 60.0
+
 #YOLO
 class YoloJoints(enum.IntEnum):
     """Enum mapping YOLO pose estimation joint names to their indices"""
@@ -51,3 +53,4 @@ YOLO_PARENTS = (
     13,  # LEFT_ANKLE
     14   # RIGHT_ANKLE
 )
+

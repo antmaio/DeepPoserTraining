@@ -13,6 +13,10 @@ __CACHE_DIR = os.path.join(config.CACHE_DIR, 'hmd-poser-ext-amass')
 
 FPS = 60.0
 
+# ------
+# --- SMPL ---
+# ------
+
 class Gender(enum.IntEnum):
     MALE = 0
     FEMALE = 1
@@ -71,14 +75,18 @@ SMPLX_LOWER_JOINTS = [
     SmplxJoints.LEFT_FOOT,
     SmplxJoints.RIGHT_FOOT,
 ]
-#YOLO
+
+# ------
+# --- YOLO ---
+# ------
+
 class YoloJoints(enum.IntEnum):
     """Enum mapping YOLO pose estimation joint names to their indices"""
     NOSE = 0
-    LEFT_EYE = 1
-    RIGHT_EYE = 2
-    LEFT_EAR = 3
-    RIGHT_EAR = 4
+    LEFT_EYE = 1 #avoid feeding model with that
+    RIGHT_EYE = 2 #avoid feeding model with that
+    LEFT_EAR = 3 #avoid feeding model with that
+    RIGHT_EAR = 4 #avoid feeding model with that
     LEFT_SHOULDER = 5
     RIGHT_SHOULDER = 6
     LEFT_ELBOW = 7
@@ -92,6 +100,25 @@ class YoloJoints(enum.IntEnum):
     LEFT_ANKLE = 15
     RIGHT_ANKLE = 16
     NUM_JTS = 17
+
+YOLO_UPPER_JOINTS = [
+    YoloJoints.NOSE,
+    YoloJoints.LEFT_SHOULDER,
+    YoloJoints.RIGHT_SHOULDER,
+    YoloJoints.LEFT_ELBOW,
+    YoloJoints.RIGHT_ELBOW,
+    YoloJoints.LEFT_WRIST,
+    YoloJoints.RIGHT_WRIST
+]
+
+YOLO_LOWER_JOINTS = [
+    YoloJoints.LEFT_HIP,
+    YoloJoints.RIGHT_HIP,
+    YoloJoints.LEFT_KNEE,
+    YoloJoints.RIGHT_KNEE,
+    YoloJoints.LEFT_ANKLE,
+    YoloJoints.RIGHT_ANKLE
+]
 
 assert os.path.isdir(config.DATA_DIR), f"{config.DATA_DIR} is not a directory"
 
