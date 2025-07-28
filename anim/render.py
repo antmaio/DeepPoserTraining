@@ -9,6 +9,7 @@ import numpy as np
 import os
 import trimesh
 from tqdm import tqdm
+import logging
 # Internal
 import anim.models as models
 import anim.train as train
@@ -16,9 +17,16 @@ import anim.data.amass as amass
 import anim.bm_config as bm_C
 from anim.models.base import BaseModel
 from human_body_prior.body_model.body_model import BodyModel
-from utils.utils_transform import matrix_to_angle_axis, two_axis_to_matrix
+from utils.utils_transform import matrix_to_angle_axis
+import config 
 
 os.environ['PYOPENGL_PLATFORM'] = 'egl'
+
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+
 
 def get_vertices_and_faces(model_base:BaseModel, bm:BodyModel)->torch.Tensor:
 
@@ -67,6 +75,22 @@ def __main():
     train_info = train.get_model_train_info(model_dir)
     if zero_betas is None:
         zero_betas = train_info['zero_betas']
+    config_info = train.get_model_config_info(model_dir)
+    # Use parameters in config_json if the file exists, parameters in config.py otherwise  
+    if config_info is not None: 
+        config.YOLO_MODEL   = config_info['yolo_model']
+        config.PROTOCOL     = config_info['protocol']
+        config.AS_TESTSET   = config_info['as_testset']
+        config.MODE         = config_info['mode']
+        config.CACHE_DIR    = config_info['cache_dir']
+        config.DATA_DIR     = config_info['data_dir']
+    logging.info('Config parameters:')
+    logging.info(f'  YOLO_MODEL : {config.YOLO_MODEL}')
+    logging.info(f'  PROTOCOL   : {config.PROTOCOL}')
+    logging.info(f'  AS_TESTSET : {config.AS_TESTSET}')
+    logging.info(f'  MODE       : {config.MODE}')
+    logging.info(f'  CACHE_DIR  : {config.CACHE_DIR}')
+    logging.info(f'  DATA_DIR   : {config.DATA_DIR}')
 
     # --- Load model ---
 
@@ -76,14 +100,14 @@ def __main():
     model = model.to(device, dtype)
     model.eval()
 
-    rec_names = amass.get_dataset_recording_names_for_split(dataset_str, split)
+    rec_names = amass.get_dataset_recording_names_for_split(config, dataset_str, split)
     if rec_idx < 0:
         rec_idx = random.randrange(0, len(rec_names))
     assert 0 <= rec_idx < len(rec_names)
     rec_name = rec_names[rec_idx]
 
     if 'amass' in dataset_str:
-        batch = amass.load_smpl(rec_name)
+        batch = amass.load_smpl(config, rec_name)
     elif dataset_str == 'egobody':
         raise NotImplementedError(f"Unknown dataset: {dataset_str}") 
         import egobody

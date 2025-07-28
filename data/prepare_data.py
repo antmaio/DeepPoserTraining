@@ -12,6 +12,20 @@ from data.utils_data import process
 from human_body_prior.body_model.body_model import BodyModel
 from data.data_config import OUTPUT_DIR, YoloJoints
 from data.utils_mmpose import _MODEL_STR_, KEYPOINTS_TOPOLOGY
+from data.camera_config import CAMERA_PATH_PROTOCOL_1,CAMERA_PATH_PROTOCOL_2,CAMERA_PATH_PROTOCOL_3
+
+def get_camera_path(cfg)->str:
+    if cfg.protocol == 1:
+        camera_path = CAMERA_PATH_PROTOCOL_1
+    elif cfg.protocol == 2:
+        camera_path = CAMERA_PATH_PROTOCOL_2
+    elif cfg.protocol == 3:
+        camera_path = CAMERA_PATH_PROTOCOL_3
+    else:
+        raise NotImplementedError("Evaluation protocol does not exist!")
+    
+    return camera_path
+
 
 def make_dst_path(cfg, subset:str,phase:str, **kwargs) -> str:
     """
@@ -116,6 +130,7 @@ if __name__ == '__main__':
         dataset = ['BioMotionLab_NTroje', 'CMU', 'MPI_HDM05']
         for subset in dataset: 
             for phase in ['train', 'test']:
+                
                 print(subset, phase)
                 split_file = os.path.join(cfg.data_split, subset, phase + "_split.txt")
                 src = os.path.join(cfg.root, subset)
@@ -128,7 +143,7 @@ if __name__ == '__main__':
                     dst = os.path.join(f'{OUTPUT_DIR}', f"protocol_{cfg.protocol}", subset ,phase)
                 """
                 os.makedirs(dst, exist_ok=True)
-                process(src, dst, body_models, logging=logging, split_file=split_file, **kwargs)
+                process(src, dst, body_models, logging=logging, split_file=split_file, camera_path=get_camera_path(cfg), **kwargs)
 
     elif cfg.protocol in [3]:
         #TODO implement :)

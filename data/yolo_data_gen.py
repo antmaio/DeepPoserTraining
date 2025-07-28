@@ -252,7 +252,7 @@ def get_keypoints_by_cam(mv, cam, fId, frame_path, orig_file, im, **kwargs):
 
     return ret, conf, KMat, PMat
 
-def get_keypoints(fId:int, mv:MeshViewer2, body_pose_hand, faces, frame_path, orig_file, **kwargs):
+def get_keypoints(fId:int, mv:MeshViewer2, body_pose_hand, faces, frame_path, orig_file, camera_path, **kwargs):
     ret = []
     confs = []
     KMatCont = []
@@ -264,7 +264,7 @@ def get_keypoints(fId:int, mv:MeshViewer2, body_pose_hand, faces, frame_path, or
     mv.set_dynamic_meshes([body_mesh])
 
     # Get all camera XML files (any naming pattern)
-    camera_files = glob.glob(os.path.join(CAMERA_PATH, '*.xml'))
+    camera_files = glob.glob(os.path.join(camera_path, '*.xml'))
     
     # Ensure sorted list of camera_files
     def get_cam_id(path):
@@ -308,6 +308,7 @@ def run_yolo(
         orig_file:str, 
         frame_path:str, 
         idx:int,
+        camera_path:str,
         **kwargs
     ):
 
@@ -335,6 +336,7 @@ def run_yolo(
             faces=faces, 
             frame_path=frame_path_id, 
             orig_file=orig_file,
+            camera_path=camera_path,
             **kwargs
         )
 

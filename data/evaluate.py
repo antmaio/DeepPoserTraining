@@ -94,16 +94,20 @@ class EvaluationMetrics:
         gt:np.ndarray,
         pred:np.ndarray,
         conf_pred:np.ndarray,
-        excluded:dict={}
+        excluded:dict={},
+        files:typing.List[str]=None
     ):
         self.gt = gt.numpy()
         self.pred = pred
         self.conf_pred = conf_pred
         self.excluded = excluded
+        self.files = files
 
+        if self.gt.shape != self.pred.shape:
+            self._check_filenames(*self.files)
+            raise ValueError(f"Ground truth shape {self.gt.shape} and prediction shape {self.pred.shape} do not match!")
 
-        assert self.gt.shape == self.pred.shape, f"ground truth {self.gt.shape} and pred data {self.pred.shape} have not the same shape!"
-        assert self.gt.shape[:-1] == self.conf_pred.shape[:-1], f"ground truth {self.gt.shape} and confidence score {self.conf_pred.shape} have not the same shape!"
+        if self.conf_pred is not None:  assert self.gt.shape[:-1] == self.conf_pred.shape[:-1], f"ground truth {self.gt.shape} and confidence score {self.conf_pred.shape} have not the same shape!"
         self.nframes, self.njoints, _ = self.gt.shape
 
         # Joint indices to include (all except excluded)
@@ -125,13 +129,22 @@ class EvaluationMetrics:
         else:
             return np.full((njoints,), np.nan)  # return NaN array of shape (njoints,)
 
+    @staticmethod
+    def _check_filenames(file_gt:str, file_pred:str):
+        print('file_gt : ', file_gt ,' | file_pred : ', file_pred)
+
     # --- Mean Error accross all joints --- 
     
     def mpjpe(self) -> np.ndarray:
         """Mean Per Joint Position Error [cm]"""
         pred = self.pred[:, self.included_joints]
         gt = self.gt[:, self.included_joints]
-        conf = self.conf_pred[:, self.included_joints]
+
+        if self.conf_pred is not None:
+            conf = self.conf_pred[:, self.included_joints]
+        else:
+            #always visible
+            conf = np.ones((self.gt.shape[0], len(self.included_joints), 2)) 
 
         errors = np.linalg.norm(pred - gt, axis=-1)
         
@@ -161,7 +174,12 @@ class EvaluationMetrics:
         vel_gt = np.diff(self.gt[:, self.included_joints], axis=0)
         vel_pred = np.diff(self.pred[:, self.included_joints], axis=0)
         
-        conf = self.conf_pred[:, self.included_joints]
+        if self.conf_pred is not None:
+            conf = self.conf_pred[:, self.included_joints]
+        else:
+            #always visible
+            conf = np.ones((self.gt.shape[0], len(self.included_joints), 2))
+        
         visible = (conf > 0.0).all(axis=-1)  # (nframes, njoints)
         visible = visible[1:] & visible[:-1]  # Must be visible in both frames
 
@@ -190,8 +208,14 @@ class EvaluationMetrics:
         """Compute relative jitter between prediction and ground truth."""
         pred = self.pred[:, self.included_joints]
         gt = self.gt[:, self.included_joints]
-        conf = self.conf_pred[:, self.included_joints, :]  # shape: (nframes, njoints, ncam)
+        
+        if self.conf_pred is not None:
+            conf = self.conf_pred[:, self.included_joints, :]
+        else:
+            #always visible
+            conf = np.ones((self.gt.shape[0], len(self.included_joints), 2)) 
 
+        
         visible = (conf > 0.0).all(axis=-1)  # shape: (nframes, njoints)
         visible_mask = (
             visible[:-3] & visible[1:-2] & visible[2:-1] & visible[3:]
@@ -340,7 +364,9 @@ class EvaluationMetrics:
         """Mean Per Joint Position Error [cm]"""
         errors = np.linalg.norm(self.pred - self.gt, axis=-1)
 
-        visible = (self.conf_pred > 0.0).all(axis=-1)  # (nframes, njoints)
+        conf = self.conf_pred if self.conf_pred is not None else np.ones((self.gt.shape[0], self.gt.shape[1], 2))
+        
+        visible = (conf > 0.0).all(axis=-1)  # (nframes, njoints)
         masked_errors = np.where(visible, errors, np.nan)
         return self.set_output_by_joint(masked_errors, mult=100)
         #return np.mean(errors, axis=0) * 100  # convert from meters to centimeters
@@ -352,7 +378,9 @@ class EvaluationMetrics:
         vel_pred = np.diff(self.pred, axis=0)
         errors = np.linalg.norm(vel_pred - vel_gt, axis=-1)
 
-        visible = (self.conf_pred > 0.0).all(axis=-1)  # (nframes, njoints)
+        conf = self.conf_pred if self.conf_pred is not None else np.ones((self.gt.shape[0], self.gt.shape[1], 2))
+
+        visible = (conf > 0.0).all(axis=-1)  # (nframes, njoints)
         visible = visible[1:] & visible[:-1]  # Must be visible in both frames
         masked_errors = np.where(visible, errors, np.nan)
 
@@ -361,7 +389,7 @@ class EvaluationMetrics:
     
 
 # --- Pretty print ---
-def print_summary(mpjpes:typing.List, mpjves:typing.List, jitters:typing.List, occlusion_rates:typing.List, **kwargs):
+def print_summary(mpjpes:typing.List, mpjves:typing.List, jitters:typing.List, occlusion_rates:typing.List=None, **kwargs):
 
     method = kwargs["method"]
     model = kwargs["model"]
@@ -376,16 +404,16 @@ def print_summary(mpjpes:typing.List, mpjves:typing.List, jitters:typing.List, o
     print(format_metric("MPJPE [cm]", mpjpes))
     print(format_metric("MPJVE [cm/s]", mpjves))
     print(format_metric("Jitter ratio", jitters))
-    print(format_metric("Occlusion Rate [%]", [v * 100 for v in occlusion_rates]))
+    if occlusion_rates is not None: print(format_metric("Occlusion Rate [%]", [v * 100 for v in occlusion_rates]))
     print("-" * 40)
 
-def print_summary_by_joint(pjpes_by_joint: typing.List, pjves_by_joint: typing.List, occlusion_rates_by_joint:typing.List,  excluded:dict={}, **kwargs):    
+def print_summary_by_joint(pjpes_by_joint: typing.List, pjves_by_joint: typing.List, occlusion_rates_by_joint:typing.List=None,  excluded:dict={}, **kwargs):    
     method = kwargs["method"]
     model = kwargs["model"]
 
     pjpes_by_joint           = np.array(pjpes_by_joint)
     pjves_by_joint           = np.array(pjves_by_joint)
-    occlusion_rates_by_joint = np.array(occlusion_rates_by_joint)
+    if occlusion_rates_by_joint is not None:    occlusion_rates_by_joint = np.array(occlusion_rates_by_joint)
 
     # Joint names and indices to keep (exclude eyes and ears)
     joint_indices = [j for j in range(len(YoloJoints)) if j not in excluded and j != YoloJoints.NUM_JTS]
@@ -399,9 +427,11 @@ def print_summary_by_joint(pjpes_by_joint: typing.List, pjves_by_joint: typing.L
     for j,jname in zip(joint_indices, joint_names):
         pjpe_mean, pjpe_std = np.nanmean(pjpes_by_joint[:, j]), np.nanstd(pjpes_by_joint[:, j])
         pjve_mean, pjve_std = np.nanmean(pjves_by_joint[:, j]), np.nanstd(pjves_by_joint[:, j])
-        occl_rate_mean, occl_rate_std = np.mean(occlusion_rates_by_joint[:, j] * 100), np.std(occlusion_rates_by_joint[:, j] * 100)
-
-        print(f"{jname:<20} {pjpe_mean:>7.2f} ± {pjpe_std:<5.2f} {pjve_mean:>7.2f} ± {pjve_std:<5.2f} {occl_rate_mean:>7.2f} ± {occl_rate_std:<5.2f}")
+        if occlusion_rates_by_joint is not None:
+            occl_rate_mean, occl_rate_std = np.mean(occlusion_rates_by_joint[:, j] * 100), np.std(occlusion_rates_by_joint[:, j] * 100)
+            print(f"{jname:<20} {pjpe_mean:>7.2f} ± {pjpe_std:<5.2f} {pjve_mean:>7.2f} ± {pjve_std:<5.2f} {occl_rate_mean:>7.2f} ± {occl_rate_std:<5.2f}")
+        else:
+            print(f"{jname:<20} {pjpe_mean:>7.2f} ± {pjpe_std:<5.2f} {pjve_mean:>7.2f} ± {pjve_std:<5.2f}")
 
     print("-" * 40)
 
@@ -424,7 +454,7 @@ def normalize_path(path: str) -> str:
     parts = path.split('/')
 
     # Remove 'triang' or 'preprocessed' components
-    parts = [p for p in parts if p not in ('triang', 'preprocessed')]
+    parts = [p for p in parts if p not in ('triang', 'preprocessed', 'openmpl')]
 
     if not parts:
         return ''
@@ -437,21 +467,19 @@ def normalize_path(path: str) -> str:
 
 def compare_lists(files_gt: typing.List[str], files_pred: typing.List[str]):
     # Normalize
-    gt_norm = [normalize_path(f) for f in files_gt]
-    pred_norm = [normalize_path(f) for f in files_pred]
+    gt_norm = sorted([normalize_path(f) for f in files_gt])
+    pred_norm = sorted([normalize_path(f) for f in files_pred])
 
-    # Compute differences
-    only_in_gt = set(gt_norm) - set(pred_norm)
-    only_in_pred = set(pred_norm) - set(gt_norm)
-
-    if not only_in_gt and not only_in_pred:
-        print("Both lists have the same elements (ignoring triang/preprocessed and extensions).")
+    for gt, pred in zip(gt_norm, pred_norm):
+        if gt != pred:
+            print(gt, pred)
+            assert False
+            
     else:
-        if only_in_gt:
-            print("Elements only in files_gt:", only_in_gt)
-        if only_in_pred:
-            print("Elements only in files_pred:", only_in_pred)
-
+        # If all items matched in the zipped loop, the missing item is the last one in pred_norm
+        print("Missing item from gt_norm:", pred_norm[-1])
+    
+    
 #comparison
 mpjpes, mpjves, jitters, occlusion_rates                           = [], [], [], []
 pjpes_by_joint, pjves_by_joint, occlusion_rates_by_joint           = [], [], []
@@ -479,23 +507,28 @@ def one_method_vs_gt(args)->None:
             points3d_gt = points3d_gt['ground_truth']
             #3d data computed from args.method
             points3d_pred = data_pred['points3d']
-            conf_pred = data_pred['conf']
+            conf_pred = data_pred.get('conf')
 
             #animate(points3d=points3d_pred, points3d_gt=points3d_gt)
             #print(points3d_gt.shape, points3d_pred.shape)            
 
             #compute metrics
-            metrics = EvaluationMetrics(points3d_gt, points3d_pred, conf_pred, excluded=excluded_joints)
+            metrics = EvaluationMetrics(points3d_gt, points3d_pred, conf_pred, excluded=excluded_joints, files=[file_gt, file_pred])
             mpjpes.append(metrics.mpjpe())
             mpjves.append(metrics.mpjve())
             jitters.append(metrics.jitter())
-            occlusion_rates.append(metrics.occlusion_rate())
-            list_of_metrics = [mpjpes, mpjves, jitters, occlusion_rates]
+            list_of_metrics = [mpjpes, mpjves, jitters]
+            if conf_pred is not None:   
+                occlusion_rates.append(metrics.occlusion_rate())
+                list_of_metrics.append(occlusion_rates)
         
             pjpes_by_joint.append(metrics.pjpe_by_joint())
             pjves_by_joint.append(metrics.pjve_by_joint())
-            occlusion_rates_by_joint.append(metrics.occlusion_rate_by_joint())
-            list_of_metrics_by_joints = [pjpes_by_joint, pjves_by_joint, occlusion_rates_by_joint]
+            list_of_metrics_by_joints = [pjpes_by_joint, pjves_by_joint]
+            if conf_pred is not None:   
+                list_of_metrics_by_joints.append(occlusion_rates_by_joint)
+                occlusion_rates_by_joint.append(metrics.occlusion_rate_by_joint())
+
 
         #Print metrics
         kwargs = {'method':args.method,'model':args.model, 'excluded':excluded_joints}

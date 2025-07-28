@@ -13,19 +13,29 @@ torch.autograd.set_detect_anomaly(True)
 #Internal
 from anim.data import amass 
 import anim.models as models
+import config
 
 __TRAIN_INFO_NAME = 'train_info.json'
+__CONFIG_INFO_NAME = 'config_info.json'
 
+def _get_info(path:str):
+    if not os.path.exists(path):
+        logging.info(f'{path} does not exists, then ignored')
+        return None
+    else:
+        with open(path, 'r') as fp:
+            train_info = json.load(fp)
+        return train_info
+    
 def get_model_train_info(model_dir: str):
     os.path.isdir(model_dir)
     train_info_path = os.path.join(model_dir, __TRAIN_INFO_NAME)
-    if not os.path.exists(train_info_path):
-        logging.info(f'{train_info_path} does not exists, then ignored')
-        return None
-    else:
-        with open(train_info_path, 'r') as fp:
-            train_info = json.load(fp)
-        return train_info
+    return _get_info(train_info_path)
+
+def get_model_config_info(model_dir: str):
+    os.path.isdir(model_dir)
+    config_info_path = os.path.join(model_dir, __CONFIG_INFO_NAME)
+    return _get_info(config_info_path)
 
 def __main():
 
@@ -57,6 +67,11 @@ def __main():
     parser.add_argument('--epochs_per_save', type=int, default=10)
     parser.add_argument('--device_str', type=str, default='cuda')
     parser.add_argument('--dtype_str', type=str, default='float32')
+    #Override config if provided 
+    parser.add_argument('--yolo_model', type=str, default=None)
+    parser.add_argument('--protocol', type=int, default=None)
+    parser.add_argument('--as_testset', type=str, default=None)
+    parser.add_argument('--mode', type=str, default=None)
 
     args = parser.parse_args()
 
@@ -91,16 +106,50 @@ def __main():
         'zero_betas': args.zero_betas,
         'data_ratio': args.data_ratio
     }
+
+    # Override config_info with CLI args (if provided)
+    if args.yolo_model is not None:
+        config.YOLO_MODEL = args.yolo_model
+
+    if args.protocol is not None:
+        config.PROTOCOL = args.protocol
+
+    if args.as_testset is not None:
+        config.AS_TESTSET = args.as_testset
+
+    if args.mode is not None:
+        config.MODE = args.mode
+            
+    config.DATA_DIR = f"./data/keypoints/{config.YOLO_MODEL}_protocol_{config.PROTOCOL}"
+    assert os.path.isdir(config.DATA_DIR), f"{config.DATA_DIR} is not a directory"
+
+    config_info = {
+        'yolo_model':config.YOLO_MODEL,
+        'protocol':config.PROTOCOL,
+        'as_testset':config.AS_TESTSET,
+        'mode':config.MODE,
+        'cache_dir':config.CACHE_DIR,
+        'data_dir':config.DATA_DIR
+    }
+    
+    logging.info('--- Config ---')
+    for key, value in config_info.items():
+        logging.info(f"{key}: {value}")
+
     train_info_path = os.path.join(model_dir, __TRAIN_INFO_NAME)
+    config_info_path = os.path.join(model_dir, __CONFIG_INFO_NAME)
     with open(train_info_path, 'w') as fp:
         json.dump(train_info, fp, indent=4)
+    with open(config_info_path, 'w') as fp:
+        json.dump(config_info, fp, indent=4)
+    
 
     model = model.to(device, dtype)
 
     # --- Dataset preparation ---
-    train_dataset = amass.get_dataset(args.dataset, 'train', args.data_ratio,
+    train_dataset = amass.get_dataset(config, args.dataset, 'train', args.data_ratio,
                                      win_len=args.win_len, win_overlap=args.win_overlap, zero_betas=args.zero_betas, dtype=dtype)
-    val_dataset = amass.get_dataset(args.dataset, 'valid', args.data_ratio,
+    val_dataset = amass.get_dataset(config, args.dataset, 'valid', args.data_ratio,
                                    win_len=args.win_len, win_overlap=args.win_overlap, zero_betas=args.zero_betas, dtype=dtype)
     # Need drop last due to loss averaging (fixed batch size)
     train_dataloader = DataLoader(train_dataset, args.batch_size,
@@ -118,6 +167,9 @@ def __main():
     try:
         while epoch < args.max_epoch:
 
+            # --- print config to check if slurm buffers job correclty ---
+            logging.info(f' ================= Epoch {epoch} =================')
+        
              # --- Train ---
             model.train()
             

@@ -46,7 +46,6 @@ def create_model_input_dict(device,dtype,win_len:int):
     
     eye_3x3 = torch.eye(3, device=device, dtype=dtype)  # shape [3, 3]
 
-
     #Dummy pos
     head_pos_global = torch.ones((batch_size, win_len, 3),device=device, dtype=dtype)
     lh_pos_global = torch.ones((batch_size, win_len, 3),device=device, dtype=dtype)

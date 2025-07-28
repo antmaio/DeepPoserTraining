@@ -184,7 +184,7 @@ def syn_acc(v, smooth_n=4):
              for i in range(0, v.shape[0] - smooth_n * 2)])
     return acc
 
-def process(src, dst, body_models, logging, split_file=None, **kwargs):
+def process(src, dst, body_models, logging, camera_path, split_file=None, **kwargs):
     assert src and dst
     
     rotation_local_full_gt_list = []
@@ -199,7 +199,7 @@ def process(src, dst, body_models, logging, split_file=None, **kwargs):
             all_file = ['/'.join(src.split('/')[:-1] + [line.rstrip('\n')]) for line in f]
 
     idx = 0
-    for filepath in all_file:
+    for filepath in sorted(all_file):
     
         if os.path.exists(os.path.join(dst, f'{idx+1}.pkl')):
             idx += 1
@@ -304,6 +304,7 @@ def process(src, dst, body_models, logging, split_file=None, **kwargs):
                 orig_file=filepath, 
                 frame_path=dst, 
                 idx=idx,
+                camera_path=camera_path,
                 **kwargs
             )
         

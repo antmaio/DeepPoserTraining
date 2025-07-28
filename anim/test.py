@@ -12,6 +12,7 @@ import json
 import os
 import logging
 
+
 # Internal
 import anim.train as train
 from anim.data import amass
@@ -19,6 +20,8 @@ import anim.models as models
 from utils import utils_transform
 import _debug as DEBUG
 from anim.data.amass import SmplxJoints, YoloJoints
+import config
+
 
 def pprint_and_save(results:dict, model_dir:str, dataset_str:str, split:str)->None:
 
@@ -82,6 +85,8 @@ def __main():
 
     # Use same parameters as from last training run of model if unspecified
     train_info = train.get_model_train_info(model_dir)
+    config_info = train.get_model_config_info(model_dir)
+
     if train_info is not None:
         if batch_size is None:
             batch_size = train_info['batch_size']
@@ -95,13 +100,29 @@ def __main():
         if any(v is None for v in [batch_size, win_len, win_overlap, zero_betas]):
             raise ValueError('train info not provided in file nor in args')
 
+    # Use parameters in config_json if the file exists, parameters in config.py otherwise  
+    if config_info is not None: 
+        config.YOLO_MODEL   = config_info['yolo_model']
+        config.PROTOCOL     = config_info['protocol']
+        config.AS_TESTSET   = config_info['as_testset']
+        config.MODE         = config_info['mode']
+        config.CACHE_DIR    = config_info['cache_dir']
+        config.DATA_DIR     = config_info['data_dir']
+    logging.info('Config parameters:')
+    logging.info(f'  YOLO_MODEL : {config.YOLO_MODEL}')
+    logging.info(f'  PROTOCOL   : {config.PROTOCOL}')
+    logging.info(f'  AS_TESTSET : {config.AS_TESTSET}')
+    logging.info(f'  MODE       : {config.MODE}')
+    logging.info(f'  CACHE_DIR  : {config.CACHE_DIR}')
+    logging.info(f'  DATA_DIR   : {config.DATA_DIR}')
+    
     if checkpoint is None:
         checkpoint = models.get_last_model_epoch(model_dir)
     model = models.load_model(model_dir, checkpoint)
     model = model.to(model_device, dtype)
     model.eval()
 
-    dataset = amass.get_dataset(dataset_str, split,
+    dataset = amass.get_dataset(config, dataset_str, split,
                                win_len=win_len, win_overlap=win_overlap, zero_betas=zero_betas)
     dataloader = DataLoader(dataset, batch_size=batch_size)
 

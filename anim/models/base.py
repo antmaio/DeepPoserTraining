@@ -147,7 +147,8 @@ def batch_to_model_input_and_target(
     gender = batch['gender'].to(device, dtype)
     #data from external pose estimation
     keypoints = batch['keypoints'].to(device, dtype)
-    conf = batch['conf'].to(device, dtype)
+    conf = batch.get('conf')
+    if isinstance(conf, torch.Tensor):  conf = conf.to(device=device, dtype=dtype)
 
     batch_size, win_len, *_ = betas.shape
 

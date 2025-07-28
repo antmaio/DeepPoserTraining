@@ -7,10 +7,11 @@ DATA_SPLIT_DIR = "../AGRoL/prepare_data/data_split"
 
 # Modify
 PROTOCOL = 1
-YOLO_MODEL = 'yolov8n-pose'
+AS_TESTSET = "cmu" #only used when PROTOCOL = 2
 
+MODE = 'triang'
+YOLO_MODEL = 'td-hm_hrnet-w32_8xb64-210e_coco-384x288'
 # Modify to specify where sfbpe will write its cache
 CACHE_DIR = ".cache"
 
 DATA_DIR = f"./data/keypoints/{YOLO_MODEL}_protocol_{PROTOCOL}"
-

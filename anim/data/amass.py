@@ -11,7 +11,25 @@ import config
 
 __CACHE_DIR = os.path.join(config.CACHE_DIR, 'hmd-poser-ext-amass')
 
+__CMU_RELATIVE_DIR = "CMU"
+__HDM05_RELATIVE_DIR = "MPI_HDM05"
+__BMLRUB_RELATIVE_DIR = "BioMotionLab_NTroje"
+
+__SUBSETS = (__CMU_RELATIVE_DIR, __HDM05_RELATIVE_DIR, __BMLRUB_RELATIVE_DIR)
+
+__DATASET_DIR_MAP = {
+    'cmu': __CMU_RELATIVE_DIR,
+    'hdm05': __HDM05_RELATIVE_DIR,
+    'bml_rub': __BMLRUB_RELATIVE_DIR
+}
+
+__3D_MODE__ = ('triang', 'openmpl') 
+
+
 FPS = 60.0
+
+
+
 
 # ------
 # --- SMPL ---
@@ -120,43 +138,66 @@ YOLO_LOWER_JOINTS = [
     YoloJoints.RIGHT_ANKLE
 ]
 
-assert os.path.isdir(config.DATA_DIR), f"{config.DATA_DIR} is not a directory"
-
-def get_protocol1_relative_recording_paths(use_cmu: bool = True, use_hdm05: bool = True, use_bmlrub: bool = True)-> List[str]:
+def get_protocol1_relative_recording_paths(config, use_cmu: bool = True, use_hdm05: bool = True, use_bmlrub: bool = True)-> List[str]:
     data_dir = pathlib.Path(config.DATA_DIR)
     return  list(data_dir.glob('*/*/**/*.pkl'))
 
-def get_protocol1_split_relative_paths(split:str, verbose:bool=True)-> Tuple:
+def get_protocol1_split_relative_paths(config, split:str, verbose:bool=True)-> Tuple:
     assert split in ('train', 'valid', 'test')
     data_dir = pathlib.Path(config.DATA_DIR)
     split = 'test' if split == 'valid' else split #take test dataset as validation, but segmented of by chunks of size win_len
     return list(data_dir.glob(f"*/{split}/**/*.pkl"))
 
+def get_protocol2_split_relative_paths(config, split: str):
+    assert split in ('train', 'valid', 'test'), f"Invalid split: {split}"
+    assert config.AS_TESTSET in ('cmu', 'bml_rub', 'hdm05'), f"Dataset {config.AS_TESTSET} not implemented"
+    
+    data_dir = pathlib.Path(config.DATA_DIR)
+
+    # Use test set as validation set (common in cross-dataset protocols)
+    actual_split = 'test' if split in ('test', 'valid') else 'train'
+
+    if actual_split == 'test':
+        return list(data_dir.glob(f"{__DATASET_DIR_MAP[config.AS_TESTSET]}/**/*.pkl"))
+    
+    # For 'train': return data from the other two datasets
+    train_set = []
+    for name, path in __DATASET_DIR_MAP.items():
+        if name != config.AS_TESTSET:
+            train_set.extend(data_dir.glob(f"{path}/**/*.pkl"))
+    return train_set
+
 def load_gt(relative_rec_path:str, fps:int=60):
     data = np.load(relative_rec_path, allow_pickle=True)
     return data
 
-def load_kp(relative_rec_path: str):
+def load_kp(config, relative_rec_path: str):
     """
     Given a .pkl path, loads the corresponding .npz file.
+    
     """
-    npz_path = pathlib.Path(relative_rec_path).with_suffix('.npz')
+    assert config.MODE in __3D_MODE__, f"mode {config.MODE} is not a valid 3D pose lifter, please provide mode in {__3D_MODE__}"
+    npz_path = pathlib.Path(relative_rec_path)
+    # data/keypoints/preprocessed/1.pkl -> data/keypoints/{mode}/1.npz
+    base_name = relative_rec_path.stem + ".npz"
+    base_dir = relative_rec_path.parents[1]
+    npz_path = base_dir / config.MODE / base_name
     data = np.load(npz_path, allow_pickle=True)
     return data
 
-def get_protocol2_split_relative_paths(relative_rec_path:str):
-    raise NotImplementedError
 
-def get_dataset_recording_names_for_split(dataset_str: str, split: str):
+
+def get_dataset_recording_names_for_split(config, dataset_str: str, split: str):
     # TODO Consider returning to random splits?
     if dataset_str == 'amass-p1':
         # For amass, the recording names are relative file paths of recordings
         if split != 'full':
-            rec_names = get_protocol1_split_relative_paths(split)
+            rec_names = get_protocol1_split_relative_paths(config, split)
         else:
-            rec_names = get_protocol1_relative_recording_paths()
+            rec_names = get_protocol1_relative_recording_paths(config)
     elif dataset_str == 'amass-p2':
-        rec_names = get_protocol2_split_relative_paths(split)
+        assert config.AS_TESTSET is not None, f"Please provide valid testset, not {config.AS_TESTSET}"
+        rec_names = get_protocol2_split_relative_paths(config, split)
     elif dataset_str == 'egobody':
         import egobody
         rec_names = egobody.get_recording_names()
@@ -167,8 +208,8 @@ def get_dataset_recording_names_for_split(dataset_str: str, split: str):
     
     return rec_names
 
-def get_dataset(dataset_str: str, split: str, ratio: float = None, **dataset_args) -> Dataset:
-    rec_names = get_dataset_recording_names_for_split(dataset_str, split)
+def get_dataset(config, dataset_str: str, split: str, ratio: float = None, **dataset_args) -> Dataset:
+    rec_names = get_dataset_recording_names_for_split(config, dataset_str, split)
 
     if ratio is not None:
         assert 0.0 < ratio < 1.0
@@ -178,7 +219,7 @@ def get_dataset(dataset_str: str, split: str, ratio: float = None, **dataset_arg
         rec_names = rec_names[:new_num_recs]
 
     if dataset_str in ('amass-p1', 'amass-p2'):
-        dataset = AMASSDataset(rec_names, phase=split, **dataset_args)
+        dataset = AMASSDataset(config, rec_names, phase=split, **dataset_args)
     elif dataset_str == 'egobody':
         import egobody
         dataset = egobody.EgoBodyDataset(rec_names, **dataset_args)
@@ -187,7 +228,7 @@ def get_dataset(dataset_str: str, split: str, ratio: float = None, **dataset_arg
     
     return dataset
 
-def load_smpl(relative_rec_path: Union[str, pathlib.Path]) -> dict:
+def load_smpl(config, relative_rec_path: Union[str, pathlib.Path]) -> dict:
 
     #only used to load test data 
 
@@ -208,14 +249,17 @@ def load_smpl(relative_rec_path: Union[str, pathlib.Path]) -> dict:
         betas = cached['betas']
         gender = cached['gender']
         keypoints = cached['keypoints']
-        conf_scores = cached['conf']
         body_parms_list = cached['body_parms_list']
+        conf_scores = cached.get('conf')
+        if isinstance(conf_scores, torch.Tensor): 
+            out_conf = conf_scores.clone()
+
     else:  # Otherwise load, compute and update cache
         # Load from dataset
         rec_path = os.path.join(config.AMASS_DIR, relative_rec_path)
         try:
             data_gt = load_gt(relative_rec_path) #get sparse signals from VR
-            data_kp = load_kp(relative_rec_path) #get 3D keypoints
+            data_kp = load_kp(config, pathlib.Path(relative_rec_path)) #get 3D keypoints
         except Exception as e: # TODO remove
             print(e)
             breakpoint()
@@ -230,13 +274,16 @@ def load_smpl(relative_rec_path: Union[str, pathlib.Path]) -> dict:
 
         #3D keypoints from pose estimation
         keypoints = torch.tensor(data_kp['points3d'], dtype=torch.float32)
-        conf_scores = torch.tensor(data_kp['conf'], dtype=torch.float32)
-
+        conf_scores = data_kp.get('conf')
+        if isinstance(conf_scores, np.ndarray): 
+            conf_scores = torch.tensor(conf_scores, dtype=torch.float32)
+            out_conf = conf_scores.clone()
+        else: 
+            out_conf = None
         if data_gt['gender'] == 'male':
             gender = torch.tensor(Gender.MALE, dtype=torch.float32)
         elif data_gt['gender'] == 'female':
             gender = torch.tensor(Gender.FEMALE, dtype=torch.float32)
-
 
         # Update cache; the cache is a bit wasteful, but we're prioritising speed
         cached = {
@@ -246,27 +293,34 @@ def load_smpl(relative_rec_path: Union[str, pathlib.Path]) -> dict:
             'betas': betas.clone(), 
             'gender': gender.clone(),
             'keypoints': keypoints.clone(),
-            'conf': conf_scores.clone(),
+            #'conf': out_conf,
             #'framerate' : self._framerate[idx],
             #'filepath': self._filepath[idx],
             'body_parms_list': body_parms_list
         }
+        if out_conf is not None:
+            cached['conf'] = out_conf
+
         os.makedirs(__CACHE_DIR, exist_ok=True)
         torch.save(cached, cached_path)
 
-        
-    return {
+    out_dict = {
         'rotations_local_full_gt_list' : rotations_local_full_gt_list.clone(),
         'hmd_position_global_full_gt_list': hmd_position_global_full_gt_list.clone(),
         'head_global_trans_list': head_global_trans_list.clone(),
         'betas': betas.clone(), 
         'gender': gender.clone(),
         'keypoints': keypoints.clone(),
-        'conf': conf_scores.clone(),
+        #'conf': out_conf,
         #'framerate' : self._framerate[idx],
         #'filepath': self._filepath[idx],
         'body_parms_list': body_parms_list
     }
+    
+    if out_conf is not None:
+        out_dict['conf'] = out_conf
+
+    return out_dict
     
     '''
         betas = torch.tensor(rec['betas'], dtype=torch.float32)
@@ -329,9 +383,9 @@ def load_smpl(relative_rec_path: Union[str, pathlib.Path]) -> dict:
     }
     '''
 
-
 class AMASSDataset(Dataset):
     def __init__(self, 
+        config, 
         relative_recording_paths: Iterable[str],
         win_len:int         = 40,
         win_overlap:int     = 5,
@@ -364,7 +418,7 @@ class AMASSDataset(Dataset):
 
             for relative_rec_path in relative_recording_paths:
                 data_gt = load_gt(relative_rec_path) #get sparse signals from VR
-                data_kp = load_kp(relative_rec_path) #get 3D keypoints
+                data_kp = load_kp(config, relative_rec_path) #get 3D keypoints
 
                 assert len(data_gt['hmd_position_global_full_gt_list']) == len(data_kp['points3d']), "Length mismatch between keypoints and ground truth"
 
@@ -379,8 +433,9 @@ class AMASSDataset(Dataset):
 
                 #3D keypoints from pose estimation
                 keypoints = torch.tensor(data_kp['points3d'], dtype=dtype) 
-                conf_scores = torch.tensor(data_kp['conf'], dtype=dtype)
-
+                conf_scores = data_kp.get('conf')
+                if isinstance(conf_scores, np.ndarray):  conf_scores = torch.tensor(data_kp['conf'], dtype=dtype)
+                
                 if num_frames < win_len:
                     continue
                 for start_frame in range(0, num_frames, win_step):
@@ -395,7 +450,11 @@ class AMASSDataset(Dataset):
                     self._head_global_trans_list.append(head_global_trans_list[start_frame:end_frame])
                     self._betas_wins.append(betas[start_frame:end_frame])  # expand to make consistent with EgoBody
                     self._external_3d_kp.append(keypoints[start_frame:end_frame])
-                    self._external_conf.append(conf_scores[start_frame:end_frame])
+                    if isinstance(conf_scores, torch.Tensor): 
+                        self._external_conf.append(conf_scores[start_frame:end_frame])
+                    else:
+                        self._external_conf.append(None)
+
 
                     #self._gender.append(data_gt['gender'])
                     #self._framerate.append(data_gt['framerate'])
@@ -418,7 +477,7 @@ class AMASSDataset(Dataset):
 
             for relative_rec_path in relative_recording_paths:
                 data_gt = load_gt(relative_rec_path) #get sparse signals from VR
-                data_kp = load_kp(relative_rec_path) #get 3D keypoints
+                data_kp = load_kp(config, relative_rec_path) #get 3D keypoints
 
                 assert len(data_gt['hmd_position_global_full_gt_list']) == len(data_kp['points3d']), "Length mismatch between keypoints and ground truth"
 
@@ -437,8 +496,9 @@ class AMASSDataset(Dataset):
 
                 #3D keypoints from pose estimation
                 keypoints = torch.tensor(data_kp['points3d'], dtype=dtype) 
-                conf_scores = torch.tensor(data_kp['conf'], dtype=dtype)
-
+                conf_scores = data_kp.get('conf')
+                if isinstance(conf_scores, np.ndarray):  conf_scores = torch.tensor(data_kp['conf'], dtype=dtype)
+                
                 self._external_3d_kp.append(keypoints)
                 self._external_conf.append(conf_scores)
 
@@ -460,16 +520,23 @@ class AMASSDataset(Dataset):
         body_parms_list = self._body_parms_list[idx] if self.phase == 'test' else -1
         if self._zero_betas:
             betas = torch.zeros_like(betas)
-        return {
+        out_conf = self._external_conf[idx].clone() if isinstance(self._external_conf[idx], torch.Tensor) else None
+
+        out_dict = {
             'rotations_local_full_gt_list' : self._rotations_local_full_gt_list[idx].clone(),
             'hmd_position_global_full_gt_list': self._hmd_position_global_full_gt_list[idx].clone(),
             'head_global_trans_list': self._head_global_trans_list[idx].clone(),
             'betas': betas, 
             'gender': self._gender[idx].clone(),
             'keypoints': self._external_3d_kp[idx].clone(),
-            'conf':self._external_conf[idx].clone(),
+            #'conf': out_conf,
             #'framerate' : self._framerate[idx],
             #'filepath': self._filepath[idx],
             'body_parms_list': body_parms_list
         }
+        
+        if out_conf is not None:
+            out_dict['conf'] = out_conf 
+    
+        return out_dict
     
