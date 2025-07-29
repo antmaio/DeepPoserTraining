@@ -119,8 +119,11 @@ def __main():
 
     if args.mode is not None:
         config.MODE = args.mode
+
+    assert config.PROTOCOL in [1,2,3], "Protocol not valid"
             
-    config.DATA_DIR = f"./data/keypoints/{config.YOLO_MODEL}_protocol_{config.PROTOCOL}"
+    str_prot = 1 if config.PROTOCOL in [1,2] else 3
+    config.DATA_DIR = f"./data/keypoints/{config.YOLO_MODEL}_protocol_{str_prot}"
     assert os.path.isdir(config.DATA_DIR), f"{config.DATA_DIR} is not a directory"
 
     config_info = {
@@ -151,6 +154,9 @@ def __main():
                                      win_len=args.win_len, win_overlap=args.win_overlap, zero_betas=args.zero_betas, dtype=dtype)
     val_dataset = amass.get_dataset(config, args.dataset, 'valid', args.data_ratio,
                                    win_len=args.win_len, win_overlap=args.win_overlap, zero_betas=args.zero_betas, dtype=dtype)
+    
+    assert False
+
     # Need drop last due to loss averaging (fixed batch size)
     train_dataloader = DataLoader(train_dataset, args.batch_size,
                                   shuffle=True, num_workers=args.dataloader_num_workers, drop_last=True)

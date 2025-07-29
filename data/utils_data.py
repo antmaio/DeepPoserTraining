@@ -11,7 +11,6 @@ from sklearn.cluster import DBSCAN
 #Internal
 from human_body_prior.tools.rotation_tools import aa2matrot, local2global_pose
 from data.yolo_data_gen import run_yolo
-from data.rendering import init_mesh_viewer
 from data.data_config import SMPL_JOINTS
 from data.utils_mmpose import _MODEL_STR_
 from utils import utils_transform
@@ -31,7 +30,6 @@ TERRAIN_HEIGHT_THRESH = 0.04 # if static toe is above this height
 ROOT_HEIGHT_THRESH = 0.04 # if maximum "static" root height is more than this + root_floor_height
 CLUSTER_SIZE_THRESH = 0.25 # if cluster has more than this faction of fps (30 for 120 fps)
 
-MV = init_mesh_viewer(camera_path = os.path.join('data', 'virtual_cameras'))
 
 def detect_joint_contact(body_joint_seq, joint_name, floor_height, vel_thresh, height_thresh):
     # calc velocity
@@ -184,7 +182,7 @@ def syn_acc(v, smooth_n=4):
              for i in range(0, v.shape[0] - smooth_n * 2)])
     return acc
 
-def process(src, dst, body_models, logging, camera_path, split_file=None, **kwargs):
+def process(src, dst, body_models, logging, camera_path, MV, split_file=None, **kwargs):
     assert src and dst
     
     rotation_local_full_gt_list = []

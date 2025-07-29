@@ -14,7 +14,6 @@ from body_visualizer.tools.vis_tools import colors
 from human_body_prior.tools.omni_tools import copy2cpu as c2c
 from data.rendering import CheckerBoard,MeshViewer2
 from data.data_config import YoloJoints
-from data.camera_config import CAMERA_PATH
 from human_body_prior.body_model.body_model import BodyModel
 #from data.utils_yolo import visualize_yolo_results
 #from data.utils_mmpose import visualize_mmpose_results

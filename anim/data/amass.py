@@ -6,6 +6,7 @@ import os
 import pathlib 
 import torch
 import enum
+import logging
 # Internal
 import config
 
@@ -151,19 +152,22 @@ def get_protocol1_split_relative_paths(config, split:str, verbose:bool=True)-> T
 def get_protocol2_split_relative_paths(config, split: str):
     assert split in ('train', 'valid', 'test'), f"Invalid split: {split}"
     assert config.AS_TESTSET in ('cmu', 'bml_rub', 'hdm05'), f"Dataset {config.AS_TESTSET} not implemented"
-    
+
+
     data_dir = pathlib.Path(config.DATA_DIR)
 
     # Use test set as validation set (common in cross-dataset protocols)
     actual_split = 'test' if split in ('test', 'valid') else 'train'
 
     if actual_split == 'test':
+        logging.info('test set: ', __DATASET_DIR_MAP[config.AS_TESTSET])
         return list(data_dir.glob(f"{__DATASET_DIR_MAP[config.AS_TESTSET]}/**/*.pkl"))
     
     # For 'train': return data from the other two datasets
     train_set = []
     for name, path in __DATASET_DIR_MAP.items():
         if name != config.AS_TESTSET:
+            logging.info('train set: ', path)
             train_set.extend(data_dir.glob(f"{path}/**/*.pkl"))
     return train_set
 

@@ -480,11 +480,14 @@ def compare_lists(files_gt: typing.List[str], files_pred: typing.List[str]):
         print("Missing item from gt_norm:", pred_norm[-1])
     
     
-#comparison
-mpjpes, mpjves, jitters, occlusion_rates                           = [], [], [], []
-pjpes_by_joint, pjves_by_joint, occlusion_rates_by_joint           = [], [], []
 
 def one_method_vs_gt(args)->None:
+
+    #comparison
+    mpjpes, mpjves, jitters, occlusion_rates                           = [], [], [], []
+    pjpes_by_joint, pjves_by_joint, occlusion_rates_by_joint           = [], [], []
+
+
     # Ensure patterns match correct file types
     files_pred = sorted(glob.glob(os.path.join(args.model, "**", "**", args.method, "*.npz")))
     files_gt = sorted(glob.glob(os.path.join(args.model, "**", "**", "preprocessed", "*.pkl")))
@@ -548,6 +551,8 @@ def __main():
     parse.add_argument('--method', type=str, required=True, choices=('triang','openmpl'), help="Use keypoints from method [triang|openmpl]")
     parse.add_argument('--model', type=str, help='Path to keypoints folder', default='./data/keypoints/yolov8x-pose_protocol_1')
     args = parse.parse_args()
+    
+    assert os.path.exists(args.model), f"args.model {args.model} does not exists" 
 
     one_method_vs_gt(args)
 

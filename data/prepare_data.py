@@ -12,7 +12,9 @@ from data.utils_data import process
 from human_body_prior.body_model.body_model import BodyModel
 from data.data_config import OUTPUT_DIR, YoloJoints
 from data.utils_mmpose import _MODEL_STR_, KEYPOINTS_TOPOLOGY
+from data.rendering import init_mesh_viewer
 from data.camera_config import CAMERA_PATH_PROTOCOL_1,CAMERA_PATH_PROTOCOL_2,CAMERA_PATH_PROTOCOL_3
+
 
 def get_camera_path(cfg)->str:
     if cfg.protocol == 1:
@@ -94,6 +96,8 @@ if __name__ == '__main__':
     group.add_argument('--mm_pose_model', action='store_true', default=False, help="Apply pose estimation with model in utils_mmpose if True")
     
     cfg = parser.parse_args() 
+    MV = init_mesh_viewer(camera_path = get_camera_path(cfg))
+
 
     # --- body models ---
     bm_fname_male = os.path.join(cfg.support_data, 'body_models/smplh/{}/model.npz'.format('male'))
@@ -134,26 +138,17 @@ if __name__ == '__main__':
                 print(subset, phase)
                 split_file = os.path.join(cfg.data_split, subset, phase + "_split.txt")
                 src = os.path.join(cfg.root, subset)
-
                 dst = make_dst_path(cfg, subset, phase, **kwargs)
-                """
-                if cfg.yolo_model is not None:
-                    dst = os.path.join(f'{OUTPUT_DIR}', f"{cfg.yolo_model}_protocol_{cfg.protocol}", subset, phase)
-                else:
-                    dst = os.path.join(f'{OUTPUT_DIR}', f"protocol_{cfg.protocol}", subset ,phase)
-                """
                 os.makedirs(dst, exist_ok=True)
-                process(src, dst, body_models, logging=logging, split_file=split_file, camera_path=get_camera_path(cfg), **kwargs)
+                process(src, dst, body_models, logging=logging, split_file=split_file, camera_path=get_camera_path(cfg), MV=MV, **kwargs)
 
     elif cfg.protocol in [3]:
-        #TODO implement :)
-        raise NotImplementedError
         train_set = ['MPI_HDM05', 'BioMotionLab_NTroje', 'CMU', 'ACCAD', 'BMLmovi', 'EKUT', 'Eyes_Japan_Dataset', 'KIT', 'MPI_Limits', 'MPI_mosh', 'SFU', 'TotalCapture']
         test_set = ['HumanEva', 'Transitions_mocap']
         all_data = {**{k: 'train' for k in train_set}, **{k: 'test' for k in test_set}}
         for subset, phase in all_data.items(): 
             print(subset, phase)
             src = os.path.join(cfg.root, subset)
-            dst = os.path.join(f"./data/protocol_{cfg.protocol}", subset, phase)
+            dst = make_dst_path(cfg, subset, phase, **kwargs)
             os.makedirs(dst, exist_ok=True)
-            process(src, dst, body_models, logging=logging, yolo_model=yolo_model, mm_pose_model=mm_pose_model)
+            #process(src, dst, body_models, logging=logging, camera_path=get_camera_path(cfg), MV=MV, **kwargs)
