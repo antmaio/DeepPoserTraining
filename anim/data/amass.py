@@ -160,14 +160,15 @@ def get_protocol2_split_relative_paths(config, split: str):
     actual_split = 'test' if split in ('test', 'valid') else 'train'
 
     if actual_split == 'test':
-        logging.info('test set: ', __DATASET_DIR_MAP[config.AS_TESTSET])
+        logging.info(f'test set: {__DATASET_DIR_MAP[config.AS_TESTSET]}')
         return list(data_dir.glob(f"{__DATASET_DIR_MAP[config.AS_TESTSET]}/**/*.pkl"))
+
     
     # For 'train': return data from the other two datasets
     train_set = []
     for name, path in __DATASET_DIR_MAP.items():
         if name != config.AS_TESTSET:
-            logging.info('train set: ', path)
+            logging.info(f'train set: {path}')
             train_set.extend(data_dir.glob(f"{path}/**/*.pkl"))
     return train_set
 

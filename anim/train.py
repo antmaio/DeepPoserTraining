@@ -55,7 +55,7 @@ def __main():
                         help="saving directory, only for models trained from scratch")
     parser.add_argument('--batch_size', type=int, default=200)
     parser.add_argument('--dataset', type=str,
-                        choices=('amass-p1', 'amass-p2', 'egobody'), default='amass-p1')
+                        choices=('amass-p1', 'amass-p2', 'amass-p3', 'egobody'), default='amass-p1')
     parser.add_argument('--win_len', type=int, default=40)
     parser.add_argument('--win_overlap', type=int, default=5)
     parser.add_argument('--zero_betas', action=argparse.BooleanOptionalAction, default=False)
@@ -69,7 +69,6 @@ def __main():
     parser.add_argument('--dtype_str', type=str, default='float32')
     #Override config if provided 
     parser.add_argument('--yolo_model', type=str, default=None)
-    parser.add_argument('--protocol', type=int, default=None)
     parser.add_argument('--as_testset', type=str, default=None)
     parser.add_argument('--mode', type=str, default=None)
 
@@ -110,19 +109,20 @@ def __main():
     # Override config_info with CLI args (if provided)
     if args.yolo_model is not None:
         config.YOLO_MODEL = args.yolo_model
-
-    if args.protocol is not None:
-        config.PROTOCOL = args.protocol
-
+   
     if args.as_testset is not None:
         config.AS_TESTSET = args.as_testset
 
     if args.mode is not None:
         config.MODE = args.mode
 
+    #Extract protocol from args.dataset
+    if 'amass' in args.dataset:
+        protocol_num = int(args.dataset.split('-p')[-1])  # or use regex
+        config.PROTOCOL = protocol_num
     assert config.PROTOCOL in [1,2,3], "Protocol not valid"
-            
     str_prot = 1 if config.PROTOCOL in [1,2] else 3
+    
     config.DATA_DIR = f"./data/keypoints/{config.YOLO_MODEL}_protocol_{str_prot}"
     assert os.path.isdir(config.DATA_DIR), f"{config.DATA_DIR} is not a directory"
 
@@ -154,8 +154,6 @@ def __main():
                                      win_len=args.win_len, win_overlap=args.win_overlap, zero_betas=args.zero_betas, dtype=dtype)
     val_dataset = amass.get_dataset(config, args.dataset, 'valid', args.data_ratio,
                                    win_len=args.win_len, win_overlap=args.win_overlap, zero_betas=args.zero_betas, dtype=dtype)
-    
-    assert False
 
     # Need drop last due to loss averaging (fixed batch size)
     train_dataloader = DataLoader(train_dataset, args.batch_size,
