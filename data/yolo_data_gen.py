@@ -15,7 +15,7 @@ from human_body_prior.tools.omni_tools import copy2cpu as c2c
 from data.rendering import CheckerBoard,MeshViewer2
 from data.data_config import YoloJoints
 from human_body_prior.body_model.body_model import BodyModel
-#from data.utils_yolo import visualize_yolo_results
+from data.utils_yolo import visualize_yolo_results
 #from data.utils_mmpose import visualize_mmpose_results
 
 
@@ -183,7 +183,7 @@ def save_body_image(body_image):
     image.save('body_image_cam_1.png')
 
 """ Pose estimation """
-def inference(body_image, frame_path, fId, orig_file, **kwargs):
+def inference(body_image, cam, frame_path, fId, orig_file, **kwargs):
 
     yolo_model  = kwargs.get('yolo_model') #pose estimation from ultralytics
     inferencer  = kwargs.get('mm_pose_model') #pose estimation from mmpose
@@ -203,7 +203,7 @@ def inference(body_image, frame_path, fId, orig_file, **kwargs):
             if len(res) > 0:
                 ret.append(res[0].keypoints.data.cpu().numpy())
                 conf.append(res[0].keypoints.conf.cpu().numpy())
-                #visualize_yolo_results(res, cam, fId)
+                visualize_yolo_results(res, cam)
 
             else:
                 save_bad_frame(frame_path, fId, orig_file)
@@ -243,6 +243,7 @@ def get_keypoints_by_cam(mv, cam, fId, frame_path, orig_file, im, **kwargs):
 
     ret, conf = inference( 
         body_image  = body_image,
+        cam         = cam,
         frame_path  = frame_path,
         fId         = fId,
         orig_file   = orig_file,

@@ -134,7 +134,6 @@ if __name__ == '__main__':
         dataset = ['BioMotionLab_NTroje', 'CMU', 'MPI_HDM05']
         for subset in dataset: 
             for phase in ['train', 'test']:
-                
                 print(subset, phase)
                 split_file = os.path.join(cfg.data_split, subset, phase + "_split.txt")
                 src = os.path.join(cfg.root, subset)
@@ -146,9 +145,9 @@ if __name__ == '__main__':
         train_set = ['MPI_HDM05', 'BioMotionLab_NTroje', 'CMU', 'ACCAD', 'BMLmovi', 'EKUT', 'Eyes_Japan_Dataset', 'KIT', 'MPI_Limits', 'MPI_mosh', 'SFU', 'TotalCapture']
         test_set = ['HumanEva', 'Transitions_mocap']
         all_data = {**{k: 'train' for k in train_set}, **{k: 'test' for k in test_set}}
-        for subset, phase in all_data.items(): 
+        for subset, phase in all_data.items():
             print(subset, phase)
             src = os.path.join(cfg.root, subset)
             dst = make_dst_path(cfg, subset, phase, **kwargs)
             os.makedirs(dst, exist_ok=True)
-            #process(src, dst, body_models, logging=logging, camera_path=get_camera_path(cfg), MV=MV, **kwargs)
+            process(src, dst, body_models, logging=logging, camera_path=get_camera_path(cfg), MV=MV, **kwargs)

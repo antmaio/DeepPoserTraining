@@ -21,6 +21,7 @@ data/mmpose_models/
 mmpose_output/
 pretrained/
 log/
+processed_images/
 
 pose_lifter/openmpl.py
 pose_lifter/animate.py
