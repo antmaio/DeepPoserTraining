@@ -96,6 +96,7 @@ def __main():
         model = models.load_model(model_dir, last_epoch)
         logging.info(f"Training '{model_dir}' from from epoch {last_epoch}; note that train_info.json will be overwritten")
 
+
     # Save training arguments
     train_info = {
         'dataset': args.dataset,

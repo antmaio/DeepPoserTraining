@@ -15,7 +15,7 @@ from human_body_prior.tools.omni_tools import copy2cpu as c2c
 from data.rendering import CheckerBoard,MeshViewer2
 from data.data_config import YoloJoints
 from human_body_prior.body_model.body_model import BodyModel
-from data.utils_yolo import visualize_yolo_results
+#from data.utils_yolo import visualize_yolo_results
 #from data.utils_mmpose import visualize_mmpose_results
 
 
@@ -203,7 +203,7 @@ def inference(body_image, cam, frame_path, fId, orig_file, **kwargs):
             if len(res) > 0:
                 ret.append(res[0].keypoints.data.cpu().numpy())
                 conf.append(res[0].keypoints.conf.cpu().numpy())
-                visualize_yolo_results(res, cam)
+                #visualize_yolo_results(res, cam)
 
             else:
                 save_bad_frame(frame_path, fId, orig_file)

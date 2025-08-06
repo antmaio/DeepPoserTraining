@@ -11,6 +11,7 @@ from data.data_config import YOLO_PARENTS, YoloJoints
 
 # config for mmpose
 _MODEL_STR_ = 'td-hm_hrnet-w32_8xb64-210e_coco-384x288' # change to desired model 
+#_MODEL_STR_ = 'rtmo-t_8xb32-600e_body7-416x416' # change to desired model 
 
 if 'coco' in _MODEL_STR_:
     KEYPOINTS_TOPOLOGY = YoloJoints

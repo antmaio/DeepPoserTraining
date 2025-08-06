@@ -153,7 +153,6 @@ def get_protocol2_split_relative_paths(config, split: str):
     assert split in ('train', 'valid', 'test'), f"Invalid split: {split}"
     assert config.AS_TESTSET in ('cmu', 'bml_rub', 'hdm05'), f"Dataset {config.AS_TESTSET} not implemented"
 
-
     data_dir = pathlib.Path(config.DATA_DIR)
 
     # Use test set as validation set (common in cross-dataset protocols)

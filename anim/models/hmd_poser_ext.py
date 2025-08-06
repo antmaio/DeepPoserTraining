@@ -95,7 +95,9 @@ class HMDPoserExt(base.BaseModel):
             for jt in chosen_jts:
                 assert 0 < jt < topology.NUM_JTS, \
                     f"An element ({jt}) of 'chosen_jts' was outside acceptable range 1-{topology.NUM_JTS - 1}))"
-
+                
+        logging.info(f"Training with {len(chosen_jts)} additional body joints")
+        
         assert hidden_size % 4 == 0, f"hidden_size ({hidden_size}) must be a multiple of 4"
         assert num_blocks > 0
         assert rnn_type in ('lstm', 'gru')
