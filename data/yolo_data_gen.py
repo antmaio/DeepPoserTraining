@@ -15,7 +15,7 @@ from human_body_prior.tools.omni_tools import copy2cpu as c2c
 from data.rendering import CheckerBoard,MeshViewer2
 from data.data_config import YoloJoints
 from human_body_prior.body_model.body_model import BodyModel
-#from data.utils_yolo import visualize_yolo_results
+from data.utils_yolo import visualize_yolo_results
 #from data.utils_mmpose import visualize_mmpose_results
 
 
@@ -178,9 +178,9 @@ def generate_new_scene_pov(mv, K):
     mv.updateCam(pov_pose, K)
     return mv
 
-def save_body_image(body_image):
+def save_body_image(body_image, cam):
     image = Image.fromarray(body_image)
-    image.save('body_image_cam_1.png')
+    image.save(f'body_image_{cam}.png')
 
 """ Pose estimation """
 def inference(body_image, cam, frame_path, fId, orig_file, **kwargs):
@@ -241,6 +241,8 @@ def get_keypoints_by_cam(mv, cam, fId, frame_path, orig_file, im, **kwargs):
     PMat = mv.get_projection_matrix()
     body_image = mv.render(render_wireframe=False)
 
+    #save_body_image(body_image=body_image, cam=cam)
+
     ret, conf = inference( 
         body_image  = body_image,
         cam         = cam,
@@ -280,6 +282,7 @@ def get_keypoints(fId:int, mv:MeshViewer2, body_pose_hand, faces, frame_path, or
         cam = os.path.basename(camera_file).split('.')[0] 
 
         mv.updateCam(camera_pose, K)
+
         im=None
 
         results, confidences, KMat, PMat = get_keypoints_by_cam(mv=mv, 

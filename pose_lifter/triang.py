@@ -22,7 +22,7 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'  # Optional: controls time format
 )
 #Internal
-from data.camera_config import CAMERA_PATH
+from data.camera_config import CAMERA_PATH_PROTOCOL_1, CAMERA_PATH_PROTOCOL_2, CAMERA_PATH_PROTOCOL_3
 from data.yolo_data_gen import extract_from_xml
 from body_visualizer.mesh.mesh_viewer import MeshViewer
 from body_visualizer.tools.vis_tools import colors
@@ -358,10 +358,21 @@ def __main():
     parse.add_argument('--output_dir', default='triang', type=str, help='relative output path to 3D keypoints')
     args = parse.parse_args()
     
-    assert args.dataset_type in ('amass_p1', 'amass_p2'), f"{args.dataset_type} not supported for --dataset_type"
+    assert args.dataset_type in ('amass_p1', 'amass_p2', 'amass_p3'), f"{args.dataset_type} not supported for --dataset_type"
 
+    if args.dataset_type in ('amass_p1', 'amass_p2'):
+        camera_path = CAMERA_PATH_PROTOCOL_1
+    else:  # args.dataset_type == 'amass_p3'
+        camera_path = CAMERA_PATH_PROTOCOL_3
     # Get all camera XML files (any naming pattern)
-    camera_files = glob.glob(os.path.join(CAMERA_PATH, '*.xml'))
+    camera_files = glob.glob(os.path.join(camera_path, '*.xml'))
+
+    def get_cam_id(path):
+        filename = os.path.basename(path)
+        _match = re.search(r'Camera_(\d+)\.xml', filename)
+        return int(_match.group(1)) if _match else float('inf')
+
+    camera_files.sort(key=get_cam_id) 
 
     # meshviewer for cam update  
     mv = set_mesh_viewer(camera_files)
@@ -378,7 +389,16 @@ def __main():
                 filename_list = glob.glob(f'./{dataroot}/MPI_HDM05/*/*.pkl') + glob.glob(f'./{dataroot}/BioMotionLab_NTroje/*/*.pkl')
             else:
                 filename_list = glob.glob(f'./{dataroot}/CMU/*/*.pkl')
-        
+        elif dataset_type == 'amass_p3':
+            if phase == 'train':
+                datasets = ['ACCAD', 'BioMotionLab_NTroje', 'BMLmovi', 'CMU','EKUT', 'Eyes_Japan_Dataset', 'KIT', 'MPI_HDM05', 'MPI_mosh', 'SFU', 'TotalCapture']
+                filename_list = [
+                    f for dataset in datasets
+                    for f in glob.glob(f'./{dataroot}/{dataset}/*/*/*.pkl')]
+                
+            else:
+                filename_list = glob.glob(f'./{dataroot}/HumanEva/*/*/*.pkl') + glob.glob(f'./{dataroot}/Transitions_mocap/*/*/*.pkl')
+
         print('-------------------------------number of {} data is {}'.format(phase, len(filename_list)))
     
         # create .../triang
@@ -406,9 +426,6 @@ def __main():
             nframes, njoints, _ = confidences.shape
 
             top2_conf, cams_max_conf = torch.topk(confidences, k=2, dim=-1)
-            print(top2_conf.shape)
-            print(top2_conf[:10,:2])
-            assert False
             points3d = np.zeros((nframes, njoints, 3))
 
             check_if_shape_matches(points3d, filename)

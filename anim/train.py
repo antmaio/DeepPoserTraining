@@ -9,7 +9,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
 import torch 
 torch.autograd.set_detect_anomaly(True)
-
+import copy 
 #Internal
 from anim.data import amass 
 import anim.models as models
@@ -17,6 +17,20 @@ import config
 
 __TRAIN_INFO_NAME = 'train_info.json'
 __CONFIG_INFO_NAME = 'config_info.json'
+
+
+#TODO remove after debug
+def is_wmodel_updated(model, old_weights):
+    new_weights = list(model.parameters())
+    changed = False
+    for i, (old, new) in enumerate(zip(old_weights, new_weights)):
+        if not torch.allclose(old.data, new.data):
+            print(f"Parameter {i} has changed")
+            changed = True
+
+    if not changed:
+        print("⚠️ No parameter changes detected!")
+
 
 def _get_info(path:str):
     if not os.path.exists(path):
@@ -184,8 +198,12 @@ def __main():
                     model_input, model_target = models.batch_to_model_input_and_target(
                         train_batch, device, dtype, mode3d=model.mode3d)
                     
+                #old_weights = copy.deepcopy(list(model.parameters()))
+
                 model.reset()
                 batch_train_losses = model.forward_pass(model_input, model_target, optimise=True)
+
+                #is_wmodel_updated(model, old_weights)
 
                 if train_losses is None:
                     train_losses = {loss_str: [] for loss_str in batch_train_losses}
@@ -222,6 +240,14 @@ def __main():
                         loss_str, {'train': train_losses[loss_str], 'val': val_losses[loss_str]}, epoch)
                 except OSError:
                     pass  # Ignore I/O error so skip this epoch log
+
+            # Log weights and gradients
+            for name, param in model.named_parameters():
+                if param.requires_grad:
+                    log_writer.add_histogram(f"Weights/{name}", param.data.cpu().numpy(), epoch)
+                    if param.grad is not None:
+                        log_writer.add_histogram(f"Gradients/{name}", param.grad.data.cpu().numpy(), epoch)
+                        log_writer.add_scalar(f"GradNorm/{name}", param.grad.data.norm().item(), epoch)
 
             # --- Save model ---
 

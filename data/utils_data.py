@@ -344,3 +344,5 @@ def process(src, dst, body_models, logging, camera_path, MV, split_file=None, **
         logging.info(f'File saved at {os.path.join(dst, f"{idx}.pkl")}')
         with open(os.path.join(dst, '{}.pkl'.format(idx)), 'wb') as f:
             pickle.dump(data, f)
+
+        assert False

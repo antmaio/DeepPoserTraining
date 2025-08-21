@@ -33,6 +33,21 @@ class HMDPoserExt(base.BaseModel):
     def model_str() -> str:
         return 'hmd-poser-ext'
 
+    #TODO for debug purpose, remove if ok
+    @staticmethod
+    def debug_check_tensor(name, t, max_abs_val=10.0):
+        """Check tensor for NaNs, Infs, or extreme values."""
+        if not torch.is_tensor(t):
+            return
+        if torch.isnan(t).any():
+            raise RuntimeError(f"[NaN detected] in {name}")
+        if torch.isinf(t).any():
+            raise RuntimeError(f"[Inf detected] in {name}")
+        if torch.abs(t).max() > max_abs_val:
+            raise RuntimeError(
+                f"[Large value detected] in {name}, max abs: {torch.abs(t).max().item():.3e}"
+        )
+
     def __init__(self,
                  # Architecture
                  chosen_jts: list[int] = None,  # indices from SmplxJoints, None defaults to 'SEWHKA'
@@ -346,6 +361,8 @@ class HMDPoserExt(base.BaseModel):
                 noise = (self.noise_augment_strength * noise).to(dtype=chosen_joints.dtype, device=chosen_joints.device)
                 chosen_joints += noise
 
+            
+
             # TODO Add noise to chosen_body_pose?
 
             # TODO Perform more augmentation?
@@ -438,6 +455,8 @@ class HMDPoserExt(base.BaseModel):
         global_orient_aa_pred = matrix_to_angle_axis(global_orient_3x3_pred)
         body_pose_aa_pred = matrix_to_angle_axis(body_pose_3x3_pred)
 
+ 
+
         sq_size = batch_size * win_len
 
         bm = self.bm_male if model_input.gender == 'male' else self.bm_female
@@ -466,6 +485,14 @@ class HMDPoserExt(base.BaseModel):
         #transl_pred = correction
         joints_pred = joints_local_pred + correction[..., None, :]
         #vertices_pred = vertices_local_pred + correction[..., None, :]
+
+
+            #TODO remove (just for debug purpose)   
+        self.debug_check_tensor("hmd_posis[0]", hmd_posis[0])
+        self.debug_check_tensor("rot_3x3", rot_3x3)
+        self.debug_check_tensor("rot_delta_3x3", rot_delta_3x3)
+        self.debug_check_tensor("body_pose_3x3_pred", body_pose_3x3_pred)
+        self.debug_check_tensor("joints_pred", joints_pred)
 
         return base.BaseModelOutput(
             betas=betas_pred,
@@ -548,6 +575,8 @@ class HMDPoserExt(base.BaseModel):
             extra_shape_loss = self.loss_func(betas_pred, torch.zeros_like(betas_pred))
             loss += self.extra_shape_loss_weight * extra_shape_loss
             loss_dict['extra_shape_loss'] = extra_shape_loss
+
+        
 
         # Metrics
         with torch.no_grad():
