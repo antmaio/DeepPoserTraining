@@ -128,7 +128,7 @@ def __main():
     # args
     parser = argparse.ArgumentParser()
     parser.add_argument('model_dir', type=str)
-    parser.add_argument('--win_len', type=int, default=40)
+    parser.add_argument('--win_len', type=int, default=1)
     parser.add_argument('--checkpoint', type=int, default=None)
     parser.add_argument('--model_device_str', type=str, default='cuda')
     parser.add_argument('--compile_mode' , type=str, default=None, choices=__COMPILE_MODE__)

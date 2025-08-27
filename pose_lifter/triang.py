@@ -372,7 +372,7 @@ def __main():
         _match = re.search(r'Camera_(\d+)\.xml', filename)
         return int(_match.group(1)) if _match else float('inf')
 
-    camera_files.sort(key=get_cam_id) 
+    camera_files.sort(key=get_cam_id)
 
     # meshviewer for cam update  
     mv = set_mesh_viewer(camera_files)

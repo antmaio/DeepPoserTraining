@@ -86,7 +86,7 @@ if __name__ == '__main__':
     # --- Parser ---
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', type=str, required=True, help='Path to data root.')
-    parser.add_argument('--protocol', type=int, default=1, choices=[1, 2, 3], help='Prepare data mode.')
+    parser.add_argument('--protocol', type=int, required=True, choices=[1, 2, 3], default=None, help='Prepare data mode.')
     #parser.add_argument('--yolo_model', type=str, default=None, choices=['yolov8n-pose','yolov8s-pose','yolov8l-pose','yolov8m-pose','yolov8x-pose','yolov8x-pose-p6', 'ground_truth'])
     parser.add_argument('--support_data', type=str, default='./support_data', help='Path to support data.')
     parser.add_argument('--data_split', type=str, default='./data/data_split', help='Path to data split.')

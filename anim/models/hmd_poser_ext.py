@@ -215,11 +215,13 @@ class HMDPoserExt(base.BaseModel):
 
         self.pose_head = nn.Sequential(
             nn.Linear(hidden_size * self.num_channels, 256),
+            #nn.LayerNorm(256), #added this
             nn.LeakyReLU(),
             nn.Linear(256, SmplxJoints.NUM_JTS * 6)
         )
         self.shape_head = nn.Sequential(
             nn.Linear(hidden_size * self.num_channels, 256),
+            #nn.LayerNorm(256), #added this
             nn.LeakyReLU(),
             nn.Linear(256, num_betas)
         )
@@ -243,15 +245,27 @@ class HMDPoserExt(base.BaseModel):
         self.extra_hand_joints_loss_weight = extra_hand_joints_loss_weight
 
         # TODO Parameterise more Adam parameters?
-        self.optim = torch.optim.Adam((p for p in self.parameters() if p.requires_grad), lr=lr)
+        self.lr = lr
+        self.optim = torch.optim.Adam((p for p in self.parameters() if p.requires_grad), lr=self.lr)
         # TODO Save last_epoch for restarts?
+        '''
         self.lr_scheduler = torch.optim.lr_scheduler.ChainedScheduler([
             torch.optim.lr_scheduler.LinearLR(self.optim, start_factor=1/100, end_factor=1, total_iters=10),
             torch.optim.lr_scheduler.LinearLR(self.optim, start_factor=1, end_factor=1/100, total_iters=390)
         ])
+        '''
+
+        '''
+        scheduler_const = torch.optim.lr_scheduler.ConstantLR(self.optim, factor=1, total_iters=300)
+        scheduler_const_d = torch.optim.lr_scheduler.ConstantLR(self.optim, factor=0.1, total_iters=100)
+        self.lr_scheduler = torch.optim.lr_scheduler.SequentialLR(
+            self.optim,
+            [scheduler_const, scheduler_const_d],
+            milestones=[300]
+        )
+        '''
 
         self.betas_pred = None
-
         self.augmentation_generator = torch.Generator()
         self.augmentation_generator.manual_seed(augmentation_seed)
         self.use_rotational_augment = use_rotational_augment
@@ -264,6 +278,11 @@ class HMDPoserExt(base.BaseModel):
         self.random_scale = None
         self.new_augments_required = True
 
+    def set_nbatch(self, batch:int):
+        self.nbatch = batch
+    def set_scheduler(self):
+        assert self.nbatch is not None and self.nbatch > 0 , f"self.nbatch is {self.nbatch}, invalid value for OneCycleLR"
+        self.lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optim, max_lr=self.lr, epochs=400, steps_per_epoch=self.nbatch)
 
     def dataset_pass(self, dataset: Dataset, device, dtype):
         pass
@@ -419,19 +438,21 @@ class HMDPoserExt(base.BaseModel):
                 rnn_output, rnn_state = self.temporal_encoder[b][c](feats[:, :, c, :], prev_rnn_state)
                 self.prev_rnn_states[b][c] = rnn_state
                 feats_temporal.append(rnn_output)
-            feats_temporal = torch.stack(feats_temporal, dim=-2)
+            self.feats_temporal = torch.stack(feats_temporal, dim=-2)
+            
             # --- Spatial ---
             # Pack frames into the batch dimension for efficiency
-            feats_temporal_tok = feats_temporal.reshape(batch_size * win_len, self.num_channels, -1)
+            feats_temporal_tok = self.feats_temporal.reshape(batch_size * win_len, self.num_channels, -1)
             feats = self.spatial_encoder[b](feats_temporal_tok)
 
         # --- Prediction heads ---
-        feats = feats.reshape(batch_size, win_len, -1)
-        pose_pred = self.pose_head(feats)
+        self.feats = feats.reshape(batch_size, win_len, -1)
+        pose_pred = self.pose_head(self.feats)
+
         pose_pred = pose_pred.reshape(batch_size, win_len, SmplxJoints.NUM_JTS, 6)
         global_orient_6d_pred = pose_pred[:, :, 0]
         body_pose_6d_pred = pose_pred[:, :, 1:]
-        betas_pred = self.shape_head(feats)
+        betas_pred = self.shape_head(self.feats)
         self.betas_pred = betas_pred
 
         #TODO remove if ok
@@ -588,8 +609,13 @@ class HMDPoserExt(base.BaseModel):
             self.optim.zero_grad()
             loss.backward()
             self.optim.step()
+            self.batch_end()
 
         return loss_dict
 
     def epoch_end(self, epoch: int, train_losses: dict, val_losses: dict):
+        #self.lr_scheduler.step()
+        pass
+
+    def batch_end(self):
         self.lr_scheduler.step()

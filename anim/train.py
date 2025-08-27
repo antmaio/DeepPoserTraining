@@ -110,7 +110,6 @@ def __main():
         model = models.load_model(model_dir, last_epoch)
         logging.info(f"Training '{model_dir}' from from epoch {last_epoch}; note that train_info.json will be overwritten")
 
-
     # Save training arguments
     train_info = {
         'dataset': args.dataset,
@@ -175,7 +174,10 @@ def __main():
                                   shuffle=True, num_workers=args.dataloader_num_workers, drop_last=True)
     val_dataloader = DataLoader(val_dataset, args.batch_size,
                                 shuffle=True, num_workers=args.dataloader_num_workers, drop_last=True)
-    
+
+    model.set_nbatch(len(train_dataloader))
+    model.set_scheduler()
+
     logging.info(f'Length (train | valid): {len(train_dataloader)} | {len(val_dataloader)}')
 
     log_dir: str = os.path.join(model_dir, 'logs')
@@ -183,6 +185,7 @@ def __main():
     # --- Main Loop --- 
     error_last_save = False
     epoch = last_epoch + 1
+    step = 0
     try:
         while epoch < args.max_epoch:
 
@@ -197,14 +200,21 @@ def __main():
                 with torch.no_grad():
                     model_input, model_target = models.batch_to_model_input_and_target(
                         train_batch, device, dtype, mode3d=model.mode3d)
-                    
-                #old_weights = copy.deepcopy(list(model.parameters()))
 
+                step += 1   
                 model.reset()
                 batch_train_losses = model.forward_pass(model_input, model_target, optimise=True)
-
-                #is_wmodel_updated(model, old_weights)
-
+                """
+                #Debug Log 
+                bs, win_len, njoints, _ = model.feats_temporal.shape
+                feats_temporal = model.feats_temporal.reshape(bs, win_len, -1)
+                log_writer.add_scalar("monitor/feats_temporal/mean", feats_temporal.mean().item(), step)
+                log_writer.add_scalar("monitor/feats_temporal/std", feats_temporal.std().item(), step)
+                log_writer.add_scalar("monitor/feats/mean", model.feats.mean().item(), step)
+                log_writer.add_scalar("monitor/feats/std", model.feats.std().item(), step)
+                log_writer.add_scalar("monitor/loss", batch_train_losses['loss'].detach().cpu().numpy(), step)
+                """
+                
                 if train_losses is None:
                     train_losses = {loss_str: [] for loss_str in batch_train_losses}
                 for loss_str in train_losses:
@@ -228,6 +238,8 @@ def __main():
                 for loss_str in val_losses:
                     val_losses[loss_str].append(batch_val_losses[loss_str].detach().cpu().numpy())
 
+
+
             # --- Log ----
 
             for loss_str in train_losses:
@@ -249,6 +261,8 @@ def __main():
                         log_writer.add_histogram(f"Gradients/{name}", param.grad.data.cpu().numpy(), epoch)
                         log_writer.add_scalar(f"GradNorm/{name}", param.grad.data.norm().item(), epoch)
 
+
+            
             # --- Save model ---
 
             if error_last_save or (epoch % args.epochs_per_save == 0):
