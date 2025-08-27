@@ -23,7 +23,6 @@ pretrained/
 log/
 processed_images/
 
-pose_lifter/openmpl.py
 pose_lifter/animate.py
 
 pose_lifter/J_regressor_coco.npy
