@@ -31,7 +31,7 @@ from utils.utils_transform import two_axis_to_matrix_onnx_friendly, matrix_to_tw
 from __config_mpl import config, update_config, update_dir, get_model_name
 import __models
 from __multiview_inference_openmplposer_rumpl import MultiViewInference_OpenMPLPoser_RUMPL 
-import __onnx as ConversionONNX
+import onnx as ConversionONNX
 
 # Enable anomaly detection to see where the operation occurs
 # torch.autograd.set_detect_anomaly(True)
