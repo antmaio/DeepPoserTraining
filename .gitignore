@@ -24,7 +24,7 @@ mmpose_output/
 pretrained/
 log/
 processed_images/
-onnx/
+onnx/*.onnx
 
 pose_lifter/animate.py
 

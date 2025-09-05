@@ -10,6 +10,7 @@ import os
 import trimesh
 from tqdm import tqdm
 import logging
+from PIL import Image
 # Internal
 import anim.models as models
 import anim.train as train
@@ -93,7 +94,6 @@ def compute_metrics(model_output:BaseModelOutput, model_target:BaseModelOutput):
     print('Upper body MPJRE local = ', mpjre_local_upper.item() , '°')
     print('Lower body MPJRE local = ', mpjre_local_lower.item() , '°')
     print(f'MPJRE For joint {joint} = ', mpjre_local_joint.item() , '°')
-
 
 def __main():
     _ = torch.autograd.set_grad_enabled(False)
@@ -195,7 +195,7 @@ def __main():
     model_input, model_target = models.batch_to_model_input_and_target(batch, device, dtype, mode3d=model.mode3d)
     model_pred = model(model_input)  # no 'reset' needed
 
-    compute_metrics(model_pred, model_target)
+    #compute_metrics(model_pred, model_target)
 
     bm = bm_male if model_input.gender == amass.Gender.MALE else bm_female
     #Pred 
@@ -249,36 +249,31 @@ def __main():
         metallicFactor=0.0, alphaMode='OPAQUE', baseColorFactor=target_color)
     renderer = pyrender.OffscreenRenderer(video_width, video_height)
 
-    for frame_idx in tqdm(range(num_frames)):
-        mesh_target = trimesh.Trimesh(vertices_target_np[frame_idx], faces_target, process=False)
-        mesh_target = pyrender.Mesh.from_trimesh(mesh_target, target_mat)
-        mesh_pred = trimesh.Trimesh(vertices_pred_np[frame_idx], faces_pred, process=False)
-        mesh_pred = pyrender.Mesh.from_trimesh(mesh_pred, pred_mat)
+    frame_idx = 0 #render frame 0
 
-        scene = pyrender.Scene(bg_color=(0, 0, 0, 0), ambient_light=(1, 1, 1))
-        scene.add(camera, pose=camera_pose)
-        scene.add(light, pose=camera_pose)
-        scene.add(mesh_target)
-        scene.add(mesh_pred)
+    mesh_target = trimesh.Trimesh(vertices_target_np[frame_idx], faces_target, process=False)
+    mesh_target = pyrender.Mesh.from_trimesh(mesh_target, target_mat)
+    mesh_pred = trimesh.Trimesh(vertices_pred_np[frame_idx], faces_pred, process=False)
+    mesh_pred = pyrender.Mesh.from_trimesh(mesh_pred, pred_mat)
 
-        img_rgba, _ = renderer.render(scene, flags=pyrender.RenderFlags.RGBA)
-        if dataset_str == 'egobody':
-            import egobody
-            img_background_bgr = cv2.undistort(
-                egobody.load_color_bgr(rec_name, kinect.name, egobody.frame_to_string(start_frame + frame_idx)),
-                kinect.intrinsics.camera_mtx,
-                kinect.intrinsics.k)
-            alpha = 0.6
-            mask = img_rgba[..., 3] > 0
-            img_bgr = img_background_bgr.copy()
-            img_bgr[mask] = alpha * img_rgba[mask][..., (2, 1, 0)] + (1 - alpha) * img_background_bgr[mask]
-        else:
-            img_bgr = img_rgba[..., (2, 1, 0)]
+    scene = pyrender.Scene(bg_color=(0, 0, 0, 0), ambient_light=(1, 1, 1))
+    scene.add(camera, pose=camera_pose)
+    scene.add(light, pose=camera_pose)
+    #scene.add(mesh_target)
+    scene.add(mesh_pred)
 
-        video_writer.write(img_bgr)
+    # Render the scene to an image
+    renderer = pyrender.OffscreenRenderer(video_width, video_height)
+    img_rgba, _ = renderer.render(scene, flags=pyrender.RenderFlags.RGBA)
 
-    video_writer.release()
-    print(f"Rendered '{video_path}'")
+    # Convert color from float [0,1] to uint8 [0,255]
+    color_uint8 = (img_rgba * 255).astype(np.uint8)
+    image = Image.fromarray(color_uint8)
+    # Save the rendered image
+    image_path = video_path.replace('.avi', '.png')  # Remove .avi and add .png
+    image.save(image_path)
+
+    print(f"Rendered '{image_path}'")
 
 
 if __name__ == "__main__":
