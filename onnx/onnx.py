@@ -1,7 +1,5 @@
 import numpy as np
 import torch
-import typing
-import onnx
 import onnxruntime as ort
 
 def convert_mpl_model(model, input, onnx_path:str):

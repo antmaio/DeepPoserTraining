@@ -29,8 +29,10 @@ from data.camera_config import CAMERA_PATH_PROTOCOL_1, CAMERA_PATH_PROTOCOL_2, C
 from utils.utils_transform import two_axis_to_matrix_onnx_friendly, matrix_to_two_axis, matrix_to_angle_axis_onnx_friendly
 
 from onnx.__config_mpl import config, update_config, update_dir, get_model_name
-from onnx._multiview_inference_openmplposer_rumpl import MultiViewInference_OpenMPLPoser_RUMPL 
+from onnx.__multiview_inference_openmplposer_rumpl import MultiViewInference_OpenMPLPoser_RUMPL 
 import onnx.onnx as ConversionONNX
+
+import __models #needed for eval(__models) 
 
 # Enable anomaly detection to see where the operation occurs
 # torch.autograd.set_detect_anomaly(True)
@@ -52,7 +54,7 @@ ONNX_PATH       = "onnx"
 USE_ONNX_INF    = True
 ONNX_CONVERSION = False
 CAMERA_PATH     = CAMERA_PATH_PROTOCOL_1
-MODEL_DIR       = './saves/hmd-poser-ext_25-9-1-10-39-54'
+MODEL_DIR       = './saves/hmd-poser-ext_yolov8n-openmpl-p1'
 CHECKPOINT      = 400
 
 

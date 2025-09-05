@@ -247,33 +247,43 @@ def __main():
     target_color = (0.0, 1.0, 0.0, 1.0)
     target_mat = pyrender.MetallicRoughnessMaterial(
         metallicFactor=0.0, alphaMode='OPAQUE', baseColorFactor=target_color)
-    renderer = pyrender.OffscreenRenderer(video_width, video_height)
+    
 
     frame_idx = 0 #render frame 0
 
-    mesh_target = trimesh.Trimesh(vertices_target_np[frame_idx], faces_target, process=False)
-    mesh_target = pyrender.Mesh.from_trimesh(mesh_target, target_mat)
+
+    # Create renderer instance
+    renderer = pyrender.OffscreenRenderer(video_width, video_height)
+
+    # Render only the specified frame
     mesh_pred = trimesh.Trimesh(vertices_pred_np[frame_idx], faces_pred, process=False)
     mesh_pred = pyrender.Mesh.from_trimesh(mesh_pred, pred_mat)
 
     scene = pyrender.Scene(bg_color=(0, 0, 0, 0), ambient_light=(1, 1, 1))
     scene.add(camera, pose=camera_pose)
     scene.add(light, pose=camera_pose)
-    #scene.add(mesh_target)
     scene.add(mesh_pred)
 
-    # Render the scene to an image
-    renderer = pyrender.OffscreenRenderer(video_width, video_height)
     img_rgba, _ = renderer.render(scene, flags=pyrender.RenderFlags.RGBA)
+    # Convert BGR to RGBA for PNG
+    # img_rgba = img_rgba[..., (2, 1, 0, 3)]
 
-    # Convert color from float [0,1] to uint8 [0,255]
-    color_uint8 = (img_rgba * 255).astype(np.uint8)
-    image = Image.fromarray(color_uint8)
-    # Save the rendered image
-    image_path = video_path.replace('.avi', '.png')  # Remove .avi and add .png
+
+    # Save as PNG
+    image_path = os.path.join(
+        render_dir, f"render_{dataset_str}_{split}_{rec_idx}_{frame_idx}_{model_dir_name}.png")
+    
+    # Convert to PIL Image and save
+    img_uint8 = (img_rgba * 255).astype(np.uint8)
+    image = Image.fromarray(img_uint8)
     image.save(image_path)
+    
+    print(f"Rendered frame {frame_idx} as '{image_path}'")
 
-    print(f"Rendered '{image_path}'")
+    renderer = pyrender.OffscreenRenderer(video_width, video_height)
+
+    # Clean up
+    renderer.delete()
 
 
 if __name__ == "__main__":
