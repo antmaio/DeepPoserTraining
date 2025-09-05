@@ -15,9 +15,9 @@ import anim.models as models
 import anim.train as train
 import anim.data.amass as amass
 import anim.bm_config as bm_C
-from anim.models.base import BaseModel
+from anim.models.base import BaseModel, BaseModelOutput
 from human_body_prior.body_model.body_model import BodyModel
-from utils.utils_transform import matrix_to_angle_axis
+from utils.utils_transform import matrix_to_angle_axis, rotation_angle_radians
 import config 
 
 os.environ['PYOPENGL_PLATFORM'] = 'egl'
@@ -39,6 +39,62 @@ def get_vertices_and_faces(model_base:BaseModel, bm:BodyModel)->torch.Tensor:
     }
     body_pose_local= bm(**{k:v for k, v in body_parms.items() if k in ['pose_body', 'root_orient']})
     return body_pose_local.v, body_pose_local.f
+
+def compute_metrics(model_output:BaseModelOutput, model_target:BaseModelOutput):
+
+    upper_body_pose_joints = [jt - 1 for jt in amass.SMPLX_UPPER_JOINTS]
+    lower_body_pose_joints = [amass.SMPLX_LOWER_JOINTS[i] - 1 for i in range(1, len(amass.SMPLX_LOWER_JOINTS))]
+
+    joint_gt = model_target.joints
+    global_orient_gt = model_target.global_orient
+    body_pose_gt = model_target.body_pose
+
+    joint_pred = model_output.joints
+    global_orient_pred = model_output.global_orient
+    body_pose_pred = model_output.body_pose
+
+    pos_err = (joint_pred - joint_gt).square().sum(dim=-1).sqrt()
+    mpjpe = 100 * pos_err.mean()
+    mpjpe_upper = 100 * pos_err[..., amass.SMPLX_UPPER_JOINTS].mean()
+    mpjpe_lower = 100 * pos_err[..., amass.SMPLX_LOWER_JOINTS].mean()
+
+    # Mean per joint rotational error
+    joint = amass.SmplxJoints.SPINE_1
+    global_orient_delta_cat = global_orient_pred @ torch.linalg.inv(global_orient_gt)
+    global_orient_rot_err = rotation_angle_radians(global_orient_delta_cat)
+    global_orient_rot_err = torch.rad2deg(global_orient_rot_err)
+
+   
+    print(body_pose_pred[:, 0, joint-1])
+    print(body_pose_gt[:, 0, joint-1])
+   
+
+    body_pose_delta_cat = body_pose_pred @ torch.linalg.inv(body_pose_gt)
+    body_pose_rot_err = rotation_angle_radians(body_pose_delta_cat)
+    body_pose_rot_err = torch.rad2deg(body_pose_rot_err)
+
+
+    num_jts = amass.SmplxJoints.NUM_JTS
+    mpjre_local = body_pose_rot_err.mean()
+    mpjre_local_upper = body_pose_rot_err[..., upper_body_pose_joints].mean()
+    mpjre_local_lower = body_pose_rot_err[..., lower_body_pose_joints].mean()
+    mpjre_local_joint = body_pose_rot_err[..., [joint - 1]].mean()
+    mpjre_root = global_orient_rot_err.mean()
+    mpjre = (1 / num_jts) * mpjre_root + ((num_jts - 1) / num_jts) * mpjre_local
+
+    print('MPJPE = ', mpjpe.item() , 'cm')
+    print('Upper body MPJPE = ', mpjpe_upper.item() , 'cm')
+    print('Lower body MPJPE = ', mpjpe_lower.item() , 'cm')
+
+    print('---------------')
+    print('MPJRE = ', mpjre.item() , '°')
+    print('MPJRE root = ', mpjre_root.item() , '°')
+    print('MPJRE local = ', mpjre_local.item() , '°')
+    print('Upper body MPJRE local = ', mpjre_local_upper.item() , '°')
+    print('Lower body MPJRE local = ', mpjre_local_lower.item() , '°')
+    print(f'MPJRE For joint {joint} = ', mpjre_local_joint.item() , '°')
+
+    assert False
 
 def __main():
     _ = torch.autograd.set_grad_enabled(False)
@@ -130,7 +186,8 @@ def __main():
     batch['head_global_trans_list'] = batch['head_global_trans_list'][None, :num_frames]
     batch['gender'] = batch['gender'][None]
     batch['keypoints'] = batch['keypoints'][None, :num_frames]
-    batch['conf'] = batch['conf'][None, :num_frames]
+    conf = batch.get('conf')
+    batch['conf'] = batch['conf'][None, :num_frames] if conf is not None else None
      
     bm_male = BodyModel(bm_fname=bm_C._BM_FNAME_MALE_, num_betas=bm_C._NUM_BETAS_, num_dmpls=bm_C._NUM_DMPLS_, dmpl_fname=bm_C._DMPL_FNAME_MALE_).to(device)
     bm_female = BodyModel(bm_fname=bm_C._BM_FNAME_MALE_, num_betas=bm_C._NUM_BETAS_, num_dmpls=bm_C._NUM_DMPLS_, dmpl_fname=bm_C._DMPL_FNAME_FEMALE_).to(device)
@@ -138,6 +195,9 @@ def __main():
     # Inference and process output and target
     model_input, model_target = models.batch_to_model_input_and_target(batch, device, dtype, mode3d=model.mode3d)
     model_pred = model(model_input)  # no 'reset' needed
+
+    compute_metrics(model_pred, model_target)
+
     bm = bm_male if model_input.gender == amass.Gender.MALE else bm_female
     #Pred 
     vertices_pred, faces_pred = get_vertices_and_faces(model_pred, bm)

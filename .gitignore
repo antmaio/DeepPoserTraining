@@ -9,6 +9,8 @@
 *.job
 *.txt
 *.json
+*.zip
+*.onnx
 
 data/keypoints/
 data/__pycache__/
@@ -22,9 +24,11 @@ mmpose_output/
 pretrained/
 log/
 processed_images/
+onnx/
 
 pose_lifter/animate.py
 
 pose_lifter/J_regressor_coco.npy
 
 _*.py
+__*/

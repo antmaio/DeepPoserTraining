@@ -41,9 +41,9 @@ def __main():
     """
     parse = argparse.ArgumentParser()
     parse.add_argument('--dataset_type', default='amass_p1', type=str, choices=('amass_p1', 'amass_p2', 'amass_p3'), help="Dataset split as in AvatarJLM")
-    parse.add_argument('--dataroot', default='./data/keypoints/yolov8x-pose_protocol_1', type=str, help='Path to pkl files')
+    parse.add_argument('--dataroot', default='./data/keypoints/yolov8n-pose_protocol_1', type=str, help='Path to pkl files')
     parse.add_argument('--mpl_path', default='../OpenMPL_private',help="Path to OpenMPL git")
-    parse.add_argument('--openmpl_ckpt', default='./pretrained/mpl/yolo11n-pose/model_best_yolo11_p1.pth.tar', help='Path of ckpt .pth.tar file for openmpl')
+    parse.add_argument('--openmpl_ckpt', default='./pretrained/mpl/yolov8n-pose/model_best_yolov8_p1.pth.tar', help='Path of ckpt .pth.tar file for openmpl')
     parse.add_argument('--output_dir', default='openmpl', type=str, help='relative output path to 3D keypoints')
     args = parse.parse_args()
      
@@ -115,7 +115,8 @@ def __main():
                 #TODO change to this config : 
                 result = subprocess.run(['python', f'{mpl_path}/RUMPL/run/inference_rumpl.py',
                                         '--cfg',
-                                        f'{mpl_path}/RUMPL/configs/openmplposer/rumpl_amass_poser_6_openmplposer_aligned_yolo8_p3/rumpl_601_amass_yolo_ConfConcat_3viewsV1V2V3_Seed0_RaySineEncNo_IntersectM_Miss20_ZrTknsNo_FuserRays_RNV0.yaml',
+                                        #/home/antoine/These/OpenMPL_private/RUMPL/configs/openmplposer/rumpl_amass_poser_3_openmplposer_aligned_yolo8/rumpl_301_amass_yolo_ConfConcat_3viewsV1V2V3_Seed0_RaySineEncNo_IntersectM_Miss20_ZrTknsNo_FuserRays_RNV0.yaml
+                                        f'{mpl_path}/RUMPL/configs/openmplposer/rumpl_amass_poser_3_openmplposer_aligned_yolo8/rumpl_301_amass_yolo_ConfConcat_3viewsV1V2V3_Seed0_RaySineEncNo_IntersectM_Miss20_ZrTknsNo_FuserRays_RNV0.yaml',
                                         #f'{mpl_path}/RUMPL/configs/openmplposer/rumpl_amass_poser/rumpl_204_amass_yolo_ConfConcat_3viewsV1V2V3_Seed0_RaySineEncNo_IntersectM_Miss20_ZrTknsNo_FuserRays_RNV0.yaml',
                                         #   '/home/ucl/elen/abolfazl/OpenMPL/RUMPL/configs/openmplposer/rumpl_amass_random/rumpl_101_amass_yolo_ConfConcat_3viewsV1V2V3_Seed0_RaySineEncNo_IntersectM_Miss20_ZrTknsNo_FuserRays_RNV3.yaml',
                                         "--data-dir", filename,

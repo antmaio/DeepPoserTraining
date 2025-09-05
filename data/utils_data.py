@@ -345,4 +345,3 @@ def process(src, dst, body_models, logging, camera_path, MV, split_file=None, **
         with open(os.path.join(dst, '{}.pkl'.format(idx)), 'wb') as f:
             pickle.dump(data, f)
 
-        assert False

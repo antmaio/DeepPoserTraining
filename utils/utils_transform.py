@@ -85,6 +85,86 @@ def quat2aa(pose_quat):
 
 EPSILON = 1e-12
 
+def two_axis_to_angle_axis(two_axis: torch.Tensor) -> torch.Tensor:
+    """
+    Direct conversion from 6D two-axis representation to axis-angle representation.
+    
+    Args:
+        two_axis: Rotation in two-axis representation, shape (..., 6)
+        
+    Returns:
+        Rotations in axis-angle form, shape (..., 3)
+    """
+    *leading_shape, last_dim = two_axis.shape
+    assert last_dim == 6
+    
+    # Extract and normalize the two axes
+    a1 = two_axis[..., 0:3]
+    a2 = two_axis[..., 3:6]
+    
+    # Normalize first axis
+    norm_a1 = torch.linalg.norm(a1, dim=-1, keepdim=True)
+    a1_norm = a1 / (norm_a1 + 1e-8)
+    
+    # Orthogonalize and normalize second axis
+    dot = torch.sum(a2 * a1_norm, dim=-1, keepdim=True)
+    a2_ortho = a2 - dot * a1_norm
+    norm_a2_ortho = torch.linalg.norm(a2_ortho, dim=-1, keepdim=True)
+    a2_norm = a2_ortho / (norm_a2_ortho + 1e-8)
+    
+    # Compute third axis (cross product)
+    a3_norm = torch.linalg.cross(a1_norm, a2_norm, dim=-1)
+    
+    # Reconstruct rotation matrix columns
+    col1, col2, col3 = a1_norm, a2_norm, a3_norm
+    
+    # Direct computation of axis-angle from matrix elements
+    # Using the same logic as matrix_to_angle_axis but without building full matrix
+    
+    # Compute omega vector (matrix[2,1] - matrix[1,2], etc.)
+    omega_x = col3[..., 1] - col2[..., 2]  # m[2,1] - m[1,2]
+    omega_y = col1[..., 2] - col3[..., 0]  # m[0,2] - m[2,0]  
+    omega_z = col2[..., 0] - col1[..., 1]  # m[1,0] - m[0,1]
+    
+    omegas = torch.stack([omega_x, omega_y, omega_z], dim=-1)
+    
+    # Compute trace: sum of diagonal elements
+    trace = col1[..., 0] + col2[..., 1] + col3[..., 2]
+    
+    # Compute angle using atan2
+    norm_omegas = torch.linalg.norm(omegas, dim=-1, keepdim=True)
+    angles = torch.atan2(norm_omegas, trace.unsqueeze(-1) - 1)
+    
+    # Handle near-zero angle case
+    zeros = torch.zeros_like(omegas)
+    omegas = torch.where(torch.isclose(angles, torch.zeros_like(angles)), zeros, omegas)
+    
+    # Handle normal case (angle not near pi)
+    axis_angles = torch.empty_like(omegas)
+    normal_case = ~angles.isclose(angles.new_full((1,), torch.pi)).squeeze(-1)
+    
+    if normal_case.any():
+        sinc_vals = torch.sinc(angles[normal_case] / torch.pi)
+        axis_angles[normal_case] = 0.5 * omegas[normal_case] / (sinc_vals + 1e-8)
+    
+    # Handle angle near pi case (special handling)
+    near_pi = angles.isclose(angles.new_full((1,), torch.pi)).squeeze(-1)
+    if near_pi.any():
+        # For near-pi case, we need the full matrix to compute the axis
+        # This is the slow path, but should be rare
+        matrix_near_pi = torch.stack([
+            col1[near_pi], col2[near_pi], col3[near_pi]
+        ], dim=-2)
+        
+        n = 0.5 * (
+            matrix_near_pi[..., 0, :] + 
+            torch.eye(3, dtype=two_axis.dtype, device=two_axis.device)
+        )
+        n_norm = torch.linalg.norm(n, dim=-1, keepdim=True)
+        axis_angles[near_pi] = angles[near_pi] * n / (n_norm + 1e-8)
+    
+    return axis_angles
+
 def angle_axis_to_matrix(angle_axis: torch.Tensor) -> torch.Tensor:
     """
     Converts from angle axis rotation representation to 3x3 matrix
@@ -214,7 +294,110 @@ def matrix_to_two_axis(matrix: torch.Tensor) -> torch.Tensor:
     col2 = matrix[..., 1]
     return torch.cat((col1, col2), dim=-1)
 
+def two_axis_to_matrix_onnx_friendly(two_axis: torch.Tensor) -> torch.Tensor:
 
+    """
+    Converts from 6D two-axis rotation representation to 3x3 matrix representation
+    :param two_axis: shape (..., 6)
+    :return: shape (..., 3, 3)
+    """
+    *leading_shape, last_dim = two_axis.shape
+    assert last_dim == 6
+
+    matrix = torch.empty(leading_shape + [3, 3], dtype=two_axis.dtype, device=two_axis.device)
+
+    in1 = two_axis[..., 0:3]
+    # Replace torch.linalg.norm with manual computation
+    norm1 = torch.sqrt(torch.sum(in1 * in1, dim=-1, keepdim=True) + EPSILON)
+    col1 = in1 / norm1
+    matrix[..., 0] = col1
+
+    in2 = two_axis[..., 3:6]
+    # Replace torch.linalg.vecdot with torch.sum
+    dot_product = torch.sum(in2 * col1, dim=-1, keepdim=True)
+    col2 = in2 - dot_product * col1
+    # Replace torch.linalg.norm with manual computation
+    norm2 = torch.sqrt(torch.sum(col2 * col2, dim=-1, keepdim=True) + EPSILON)
+    col2 = col2 / norm2
+    matrix[..., 1] = col2
+
+    col3 = torch.linalg.cross(col1, col2, dim=-1)
+    matrix[..., 2] = col3
+
+    return matrix
+
+def matrix_to_angle_axis_onnx_friendly(matrix: torch.Tensor) -> torch.Tensor:
+    """
+    Convert rotations given as rotation matrices to axis/angle.
+    Handles shapes like [1, 1, 3, 3] and [1, 1, 21, 3, 3].
+    """
+    if matrix.size(-1) != 3 or matrix.size(-2) != 3:
+        raise ValueError(f"Invalid rotation matrix shape {matrix.shape}.")
+
+    # Original shape for reshaping later
+    original_shape = matrix.shape[:-2]  # [1, 1] or [1, 1, 21]
+    flat_shape = (-1, 3, 3)  # Flatten all batch dimensions
+    matrix_flat = matrix.view(flat_shape)
+    batch_size = matrix_flat.shape[0]
+
+    # Compute omegas (skew-symmetric part)
+    omegas = torch.stack([
+        matrix_flat[..., 2, 1] - matrix_flat[..., 1, 2],
+        matrix_flat[..., 0, 2] - matrix_flat[..., 2, 0],
+        matrix_flat[..., 1, 0] - matrix_flat[..., 0, 1]
+    ], dim=-1)  # shape: [batch_size, 3]
+
+    # Compute norms and traces
+    norms = torch.sqrt(torch.sum(omegas * omegas, dim=-1, keepdim=True) + 1e-8)
+    traces = matrix_flat[..., 0, 0] + matrix_flat[..., 1, 1] + matrix_flat[..., 2, 2]
+    traces = traces.unsqueeze(-1)
+    
+    # Compute angles
+    angles = torch.atan2(norms, traces - 1)
+
+    # Initialize axis_angles
+    axis_angles = torch.zeros_like(omegas)
+
+    # Handle normal case (angle not near zero or pi)
+    zero_mask = (angles < 1e-6).squeeze(-1)
+    pi_mask = (torch.abs(angles - torch.pi) < 1e-6).squeeze(-1)
+    normal_mask = ~zero_mask & ~pi_mask
+
+    if normal_mask.any():
+        # For normal angles: axis_angle = 0.5 * omega / sinc(angle/pi)
+        angle_vals = angles[normal_mask]
+        omega_vals = omegas[normal_mask]
+        
+        # Manual sinc computation: sinc(x) = sin(πx)/(πx)
+        x = angle_vals / torch.pi
+        sinc_vals = torch.sin(x) / x
+        
+        axis_angles[normal_mask] = 0.5 * omega_vals / (sinc_vals + 1e-8)
+
+    # Handle near-zero angles (set to zero)
+    axis_angles[zero_mask.squeeze(-1)] = 0.0
+
+    # Handle near-pi angles
+    if pi_mask.any():
+        # For angles near pi: use eigenvector approach
+        pi_matrices = matrix_flat[pi_mask]
+        # R + I
+        r_plus_i = pi_matrices + torch.eye(3, device=matrix.device, dtype=matrix.dtype)
+        # Take first column as eigenvector approximation
+        eigenvectors = r_plus_i[..., :1].squeeze(-2)  # shape: [n_pi, 3]
+        
+        # Normalize eigenvectors
+        eigen_norms = torch.sqrt(torch.sum(eigenvectors * eigenvectors, dim=-1, keepdim=True) + 1e-8)
+        eigenvectors_normalized = eigenvectors / eigen_norms
+        
+        # Scale by angle (pi)
+        axis_angles[pi_mask] = angles[pi_mask] * eigenvectors_normalized
+
+    # Reshape back to original format
+    final_shape = original_shape + (3,)
+    return axis_angles.view(final_shape)
+
+    
 def two_axis_to_matrix(two_axis: torch.Tensor) -> torch.Tensor:
     """
     Converts from to 6D two-axis rotation representation to 3x3 matrix representation

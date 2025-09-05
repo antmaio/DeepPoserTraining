@@ -254,9 +254,11 @@ def load_smpl(config, relative_rec_path: Union[str, pathlib.Path]) -> dict:
         gender = cached['gender']
         keypoints = cached['keypoints']
         body_parms_list = cached['body_parms_list']
-        conf_scores = cached.get('conf')
+        conf_scores = cached.get('conf')    
         if isinstance(conf_scores, torch.Tensor): 
             out_conf = conf_scores.clone()
+        else:
+            out_conf = None
 
     else:  # Otherwise load, compute and update cache
         # Load from dataset
@@ -304,6 +306,8 @@ def load_smpl(config, relative_rec_path: Union[str, pathlib.Path]) -> dict:
         }
         if out_conf is not None:
             cached['conf'] = out_conf
+        else:
+            cached['conf'] = None
 
         os.makedirs(__CACHE_DIR, exist_ok=True)
         torch.save(cached, cached_path)
@@ -323,6 +327,8 @@ def load_smpl(config, relative_rec_path: Union[str, pathlib.Path]) -> dict:
     
     if out_conf is not None:
         out_dict['conf'] = out_conf
+    else:
+        out_dict['conf'] = None
 
     return out_dict
     

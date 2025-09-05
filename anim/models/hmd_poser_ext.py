@@ -25,6 +25,41 @@ logging.basicConfig(
     level=logging.INFO
 )
 
+def two_axis_orthonormality_loss(two_axis: torch.Tensor, epsilon: float = 1e-8, det_weight: float = 1.0):
+    """
+    More efficient orthonormality loss with determinant constraint.
+    """
+    assert two_axis.shape[-1] == 6
+    
+    # Split into two axes
+    axis1 = two_axis[..., :3]
+    axis2 = two_axis[..., 3:]
+    
+    # Calculate norms
+    norm1 = torch.norm(axis1, dim=-1)
+    norm2 = torch.norm(axis2, dim=-1)
+    
+    # Normalize axes
+    axis1_norm = axis1 / (norm1.unsqueeze(-1) + epsilon)
+    axis2_norm = axis2 / (norm2.unsqueeze(-1) + epsilon)
+    
+    # Orthonormality constraints
+    norm_loss1 = torch.square(norm1 - 1.0)
+    norm_loss2 = torch.square(norm2 - 1.0)
+    dot_product = torch.sum(axis1_norm * axis2_norm, dim=-1)
+    ortho_loss = torch.square(dot_product)
+    
+    # Efficient determinant computation
+    # For orthonormal vectors, det = dot(cross(a,b), cross(a,b)) = 1 when orthonormal
+    cross_product = torch.linalg.cross(axis1_norm, axis2_norm, dim=-1)
+    cross_norm_sq = torch.sum(cross_product * cross_product, dim=-1)
+    det_loss = torch.square(cross_norm_sq - 1.0)  # Should be 1 for proper rotation
+    
+    # Combine losses
+    ortho_component = norm_loss1 + norm_loss2 + ortho_loss
+    total_loss = ortho_component + det_weight * det_loss
+    
+    return total_loss.mean()
 
 class HMDPoserExt(base.BaseModel):
     """ Extension of HMD-Poser to gracefully exploit 'hmr_joints' and/or 'hmr_body_pose' """
@@ -72,10 +107,13 @@ class HMDPoserExt(base.BaseModel):
                  smooth_loss_weight: float = 0.5,
                  shape_loss_weight: float = 0.1,
                  extra_shape_loss_weight: float = 0.0,
+                 orth_loss: float = 0.1,
                  # TODO validate hand weights
                  extra_hand_pose_loss_weight: float = 0.0,
                  extra_hand_pose_global_loss_weight: float = 0.0,
                  extra_hand_joints_loss_weight: float = 0.0,
+                 # orth loss weight
+                 orthonormality_loss_weight: float=1.0,
                  # Optimizer
                  lr: float = 1e-3,
                  # Augmentation
@@ -147,8 +185,8 @@ class HMDPoserExt(base.BaseModel):
         ])
 
         # --- Pose estimator (HMR) embeddings ---
-
         self.chosen_jts_local = torch.tensor(chosen_jts, dtype=torch.int32) - 1
+        #self.chosen_jts_local = torch.tensor(chosen_jts, dtype=torch.int32) #TODO try with model_input.head_pos_global as root for local chosen jts
         self.num_chosen_jts = len(chosen_jts)
         self.use_hmr_body_pose = use_hmr_body_pose
         self.use_hmr_velocities = use_hmr_velocities
@@ -243,6 +281,7 @@ class HMDPoserExt(base.BaseModel):
         self.extra_hand_pose_loss_weight = extra_hand_pose_loss_weight
         self.extra_hand_pose_global_loss_weight = extra_hand_pose_global_loss_weight
         self.extra_hand_joints_loss_weight = extra_hand_joints_loss_weight
+        self.orthonormality_loss_weight = orthonormality_loss_weight
 
         # TODO Parameterise more Adam parameters?
         self.lr = lr
@@ -342,7 +381,9 @@ class HMDPoserExt(base.BaseModel):
         ]
 
         # Model variation that only uses body_pose
-        hmr_joints_local = model_input.hmr_joints[:, :, 1:SmplxJoints.NUM_JTS] - model_input.hmr_joints[:, :, :1]
+        
+        #hmr_joints_local = model_input.hmr_joints - model_input.head_pos_global.unsqueeze(2) #TODO try ot
+        hmr_joints_local = model_input.hmr_joints[:, :, 1:YoloJoints.NUM_JTS] - model_input.hmr_joints[:, :, :1]
         chosen_joints = hmr_joints_local[:, :, self.chosen_jts_local]
         chosen_body_pose = model_input.hmr_body_pose[:, :, self.chosen_jts_local]
 
@@ -450,10 +491,16 @@ class HMDPoserExt(base.BaseModel):
         pose_pred = self.pose_head(self.feats)
 
         pose_pred = pose_pred.reshape(batch_size, win_len, SmplxJoints.NUM_JTS, 6)
-        global_orient_6d_pred = pose_pred[:, :, 0]
-        body_pose_6d_pred = pose_pred[:, :, 1:]
+        self.global_orient_6d_pred = pose_pred[:, :, 0]
+        self.body_pose_6d_pred = pose_pred[:, :, 1:]
         betas_pred = self.shape_head(self.feats)
         self.betas_pred = betas_pred
+
+        #TODO check orthonormality of         self.global_orient_6d_pred = pose_pred[:, :, 0] and self.body_pose_6d_pred = pose_pred[:, :, 1:]
+        # Per-joint statistics
+        # joint_stats = self.per_joint_statistics()
+        # Detailed check with per-joint analysis
+        # results = self.check_all_orthonormality()
 
         #TODO remove if ok
         #DEBUG.subplot_rot_6d(body_pose_6d_pred, save_path="rot_joint_subplot_6d_pred_only.png", j=SmplxJoints.LEFT_FOOT-1)
@@ -461,22 +508,21 @@ class HMDPoserExt(base.BaseModel):
        
 
         # --- Computing transl_pred and joints_pred ---
-        global_orient_3x3_pred = two_axis_to_matrix(global_orient_6d_pred)
-        body_pose_3x3_pred = two_axis_to_matrix(body_pose_6d_pred)
-
+        global_orient_3x3_pred = two_axis_to_matrix(self.global_orient_6d_pred)
+        body_pose_3x3_pred = two_axis_to_matrix(self.body_pose_6d_pred)
+        
         #TODO remove if ok
         #DEBUG.subplot_rot(body_pose_3x3_pred,save_path="rot_joint_subplot_pred_only.png", j=SmplxJoints.LEFT_FOOT-1)
         #logging.info('3x3 min max : ', body_pose_3x3_pred.max(), body_pose_3x3_pred.min())
 
+        
         #TODO remove (just for debug purpose)
-        if not self.training:
-            body_pose_3x3_pred[:,:,SmplxJoints.LEFT_FOOT-1] = torch.abs(body_pose_3x3_pred[:,:,SmplxJoints.LEFT_FOOT-1]) 
-            body_pose_3x3_pred[:,:,SmplxJoints.RIGHT_FOOT-1]= torch.abs(body_pose_3x3_pred[:,:,SmplxJoints.RIGHT_FOOT-1])
+        #if not self.training:
+            #body_pose_3x3_pred[:,:,SmplxJoints.LEFT_FOOT-1] = torch.abs(body_pose_3x3_pred[:,:,SmplxJoints.LEFT_FOOT-1])
+            #body_pose_3x3_pred[:,:,SmplxJoints.RIGHT_FOOT-1]= torch.abs(body_pose_3x3_pred[:,:,SmplxJoints.RIGHT_FOOT-1])
 
         global_orient_aa_pred = matrix_to_angle_axis(global_orient_3x3_pred)
         body_pose_aa_pred = matrix_to_angle_axis(body_pose_3x3_pred)
-
- 
 
         sq_size = batch_size * win_len
 
@@ -484,7 +530,7 @@ class HMDPoserExt(base.BaseModel):
         body_parms_pred = {
             'pose_body': body_pose_aa_pred.view(sq_size, (SmplxJoints.NUM_JTS-1)*3),
             'root_orient' : global_orient_aa_pred.view(sq_size, -1)
-        }  
+        }
         # Log shapes of each tensor in the dict
         
         body_pose_local = bm(**{k:v for k, v in body_parms_pred.items() if k in ['pose_body', 'root_orient']})
@@ -597,8 +643,11 @@ class HMDPoserExt(base.BaseModel):
             loss += self.extra_shape_loss_weight * extra_shape_loss
             loss_dict['extra_shape_loss'] = extra_shape_loss
 
-        
-
+        orthonormality_loss = two_axis_orthonormality_loss(self.global_orient_6d_pred)
+        orthonormality_loss +=two_axis_orthonormality_loss(self.body_pose_6d_pred)
+        loss_dict['orthonormality_loss'] = orthonormality_loss
+        loss += self.orthonormality_loss_weight * orthonormality_loss
+    
         # Metrics
         with torch.no_grad():
             loss_dict['MPJPE(cm)'] = 100 * (joints_target - joints_pred).square().sum(dim=-1).sqrt().mean()
@@ -608,8 +657,7 @@ class HMDPoserExt(base.BaseModel):
         if optimise:
             self.optim.zero_grad()
             loss.backward()
-            self.optim.step()
-            self.batch_end()
+            self.batch_end() 
 
         return loss_dict
 
@@ -618,4 +666,90 @@ class HMDPoserExt(base.BaseModel):
         pass
 
     def batch_end(self):
+        # --- Gradient Clipping Added HERE ---
+
+        torch.nn.utils.clip_grad_norm_(
+            self.parameters(),  
+            max_norm=1.0,  # The maximum allowed norm of the gradients
+            norm_type=2.0   # L2 norm
+        )
+        # ------------------------------------
+        self.optim.step()
         self.lr_scheduler.step()
+
+    #MISC
+    def orthonormality_statistics(self, threshold: float = 1e-3):
+        """
+        Get detailed statistics about orthonormality.
+        """
+        def get_stats(tensor, name):
+            two_axis_flat = tensor.reshape(-1, 6)
+            axis1 = two_axis_flat[:, :3]
+            axis2 = two_axis_flat[:, 3:]
+            
+            norm1 = torch.norm(axis1, dim=1)
+            norm2 = torch.norm(axis2, dim=1)
+            dots = torch.sum(axis1 * axis2, dim=1)
+            
+            return {
+                'name': name,
+                'mean_norm1_error': torch.mean(torch.abs(norm1 - 1.0)).item(),
+                'mean_norm2_error': torch.mean(torch.abs(norm2 - 1.0)).item(),
+                'mean_dot': torch.mean(torch.abs(dots)).item(),
+                'max_norm1_error': torch.max(torch.abs(norm1 - 1.0)).item(),
+                'max_norm2_error': torch.max(torch.abs(norm2 - 1.0)).item(),
+                'max_dot': torch.max(torch.abs(dots)).item(),
+                'within_threshold': torch.mean((torch.abs(norm1 - 1.0) < threshold).float()).item() * 100
+            }
+        
+        stats = []
+        stats.append(get_stats(self.global_orient_6d_pred, "Global Orientation"))
+        stats.append(get_stats(self.body_pose_6d_pred, "All Body Joints"))
+        
+        # Print statistics
+        for stat in stats:
+            print(f"\n{stat['name']}:")
+            print(f"  Mean norm errors: {stat['mean_norm1_error']:.6f}, {stat['mean_norm2_error']:.6f}")
+            print(f"  Mean dot product: {stat['mean_dot']:.6f}")
+            print(f"  Max norm errors: {stat['max_norm1_error']:.6f}, {stat['max_norm2_error']:.6f}")
+            print(f"  Max dot product: {stat['max_dot']:.6f}")
+            print(f"  Within threshold: {stat['within_threshold']:.1f}%")
+        
+        return stats
+    def per_joint_statistics(self, threshold: float = 1e-3):
+        """
+        Get statistics for each joint separately.
+        """
+        print("Per-joint orthonormality statistics:")
+        print("-" * 50)
+        
+        joint_stats = []
+        for joint_idx in range(self.body_pose_6d_pred.shape[2]):
+            joint_6d = self.body_pose_6d_pred[:, :, joint_idx, :]
+            two_axis_flat = joint_6d.reshape(-1, 6)
+            
+            axis1 = two_axis_flat[:, :3]
+            axis2 = two_axis_flat[:, 3:]
+            
+            norm1 = torch.norm(axis1, dim=1)
+            norm2 = torch.norm(axis2, dim=1)
+            dots = torch.sum(axis1 * axis2, dim=1)
+            
+            stats = {
+                'joint': joint_idx,
+                'mean_norm_error': (torch.mean(torch.abs(norm1 - 1.0)) + torch.mean(torch.abs(norm2 - 1.0))).item() / 2,
+                'mean_dot': torch.mean(torch.abs(dots)).item(),
+                'max_norm_error': torch.max(torch.cat([torch.abs(norm1 - 1.0), torch.abs(norm2 - 1.0)])).item(),
+                'max_dot': torch.max(torch.abs(dots)).item(),
+                'is_orthonormal': (torch.all(torch.abs(norm1 - 1.0) < threshold) and
+                                torch.all(torch.abs(norm2 - 1.0) < threshold) and
+                                torch.all(torch.abs(dots) < threshold))
+            }
+            joint_stats.append(stats)
+            
+            print(f"Joint {joint_idx:2d}: "
+                f"mean_err={stats['mean_norm_error']:.6f}, "
+                f"mean_dot={stats['mean_dot']:.6f}, "
+                f"orthonormal={stats['is_orthonormal']}")
+        
+        return joint_stats

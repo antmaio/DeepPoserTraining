@@ -317,7 +317,6 @@ def run_yolo(
 
     # Choose the device to run the body model on.
     comp_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(comp_device)
 
     # Create the body model
     faces = c2c(bm.f)
