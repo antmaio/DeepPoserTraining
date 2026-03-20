@@ -1,0 +1,14 @@
+[data_path]
+root = "../AMASS"
+support_data = "./data/support_data"
+data_split = "./data/data_split"
+output_dir = "./data/keypoints/"
+
+[yolo]
+model = "yolov8m-pose"
+
+[body_model]
+topology = "smpl"
+
+[protocol]
+protocol = 1

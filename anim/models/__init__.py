@@ -2,147 +2,204 @@
 Inspired from https://github.com/georgedf1/sfbpe/tree/main
 """
 # External
+import logging
 import os
 import shutil
+
 import tomli
-import logging
-#Internal
-from .base import *
-from .hmd_poser_ext import HMDPoserExt
+import torch
+
+# Internal
+from .base import * #TODO remove * for safety 
+from .hmd_poser_ext_hmr_head_centered import HMDPoserExtHeadCentered
 from utils.utils_option import generate_time_str
-# --- Add new models here ---
-__MODEL_REGISTRY = (HMDPoserExt,)
-__MODEL_DICT = {model.model_str(): model for model in __MODEL_REGISTRY}
 
-__MODEL_CONFIG_NAME = 'model_config.toml'
-__MODEL_STATE_DICTS_DIR_NAME = 'model_state_dicts'
+# ---------------------------------------------------------------------------
+# Model registry
+# ---------------------------------------------------------------------------
 
-def __create_model(model_cfg_path: str) -> BaseModel:
-    assert os.path.isfile(model_cfg_path)
+_MODEL_REGISTRY: tuple[type[BaseModel], ...] = (
+    HMDPoserExtHeadCentered,
+    # Add new models here
+)
+_MODEL_DICT: dict[str, type[BaseModel]] = {
+    m.model_str(): m for m in _MODEL_REGISTRY
+}
+
+_MODEL_CONFIG_NAME       = 'model_config.toml'
+_STATE_DICTS_DIR         = 'model_state_dicts'
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _create_model(model_cfg_path: str) -> BaseModel:
+    assert os.path.isfile(model_cfg_path), f"Config not found: {model_cfg_path}"
     with open(model_cfg_path, 'rb') as fp:
-        model_cfg = tomli.load(fp)
-    assert 'model_str' in model_cfg, "Model TOML must have 'model_str' entry"
-    assert 'model_args' in model_cfg, "Model TOML must have '[model_args]'"
-    model_str = model_cfg['model_str']
-    model_args = model_cfg['model_args']
-    assert '_' not in model_str, 'model_str containing underscore is forbidden'
-    assert model_str in __MODEL_DICT, f"Could not find model with name '{model_str}'"
-    return __MODEL_DICT[model_str](**model_args)
+        cfg = tomli.load(fp)
+    assert 'model_str'  in cfg, "Model TOML must have a 'model_str' entry."
+    assert 'model_args' in cfg, "Model TOML must have a '[model_args]' section."
+    model_str = cfg['model_str']
+    assert '_' not in model_str, "model_str must not contain underscores."
+    assert model_str in _MODEL_DICT, f"Unknown model '{model_str}'."
+    return _MODEL_DICT[model_str](**cfg['model_args'])
 
 
-def create_new_model_and_dir(model_cfg_path: str, save_dir: str) -> tuple[BaseModel, str]:
-    model = __create_model(model_cfg_path)
-    time_str = generate_time_str()
-    model_dir = os.path.join(save_dir, f"{model.model_str()}_{time_str}")
+def _state_dict_dir(model_dir: str) -> str:
+    return os.path.join(model_dir, _STATE_DICTS_DIR)
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def create_new_model_and_dir(
+    model_cfg_path: str,
+    save_dir: str,
+) -> tuple[BaseModel, str]:
+    """Create a fresh model and its associated directory."""
+    model = _create_model(model_cfg_path)
+    model_dir = os.path.join(save_dir, f"{model.model_str()}_{generate_time_str()}")
     os.makedirs(model_dir)
-    model_cfg_copy_path = os.path.join(model_dir, __MODEL_CONFIG_NAME)
-    shutil.copyfile(model_cfg_path, model_cfg_copy_path)
-    model_state_dict_dir = os.path.join(model_dir, __MODEL_STATE_DICTS_DIR_NAME)
-    os.mkdir(model_state_dict_dir)
+    shutil.copyfile(model_cfg_path, os.path.join(model_dir, _MODEL_CONFIG_NAME))
+    os.mkdir(_state_dict_dir(model_dir))
     return model, model_dir
 
 
 def save_model(model: BaseModel, model_dir: str, epoch: int):
-    model_state_dict_save_path = os.path.join(model_dir, __MODEL_STATE_DICTS_DIR_NAME, str(epoch) + '.pt')
-    torch.save(model.state_dict(), model_state_dict_save_path)
+    """Save model weights, optimiser state, and scheduler state for *epoch*."""
+    sd_dir = _state_dict_dir(model_dir)
+    torch.save(model.state_dict(),         os.path.join(sd_dir, f'{epoch}.pt'))
+    torch.save(model.optim.state_dict(),   os.path.join(sd_dir, f'optimizer_{epoch}.pt'))
+    torch.save(model.lr_scheduler.state_dict(), os.path.join(sd_dir, f'scheduler_{epoch}.pt'))
 
 
-def get_last_model_epoch(model_dir) -> int:
-    model_state_dict_dir = os.path.join(model_dir, __MODEL_STATE_DICTS_DIR_NAME)
-    checkpoints = list(map(lambda s: int(s[:-3]),
-                           filter(lambda f: f.endswith('.pt'),
-                                  os.listdir(model_state_dict_dir))))
-    assert len(checkpoints) > 0, f"No model saves available for '{model_dir}'"
-    checkpoints.sort()  # sort by ascending epoch
-    # Fetch newest if epoch unspecified
-    return checkpoints[-1]
+def get_last_model_epoch(model_dir: str) -> int:
+    """Return the highest epoch number for which a checkpoint exists."""
+    sd_dir = _state_dict_dir(model_dir)
+    epochs = [
+        int(f[:-3])
+        for f in os.listdir(sd_dir)
+        if f.endswith('.pt') and f[:-3].isdigit()
+    ]
+    assert epochs, f"No model checkpoints found in '{sd_dir}'."
+    return max(epochs)
 
 
-def load_model(model_dir: str, epoch: int):
-    # Overwrite log file every time the script runs
-    logging.basicConfig(
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        level=logging.INFO
-    )
-    model_state_dict_dir = os.path.join(model_dir, __MODEL_STATE_DICTS_DIR_NAME)
-    checkpoint_path = os.path.join(model_state_dict_dir, str(epoch) + '.pt')
-    assert os.path.isfile(checkpoint_path)
-    model_cfg_path = os.path.join(model_dir, __MODEL_CONFIG_NAME)
-    model = __create_model(model_cfg_path)
+def load_model(model_dir: str, epoch: int, nbatch: int, device) -> BaseModel:
+    """
+    Load a model from a checkpoint, trying multiple key-adaptation strategies.
+    """
+    logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
+
+    checkpoint_path = os.path.join(_state_dict_dir(model_dir), f'{epoch}.pt')
+    assert os.path.isfile(checkpoint_path), f"Checkpoint not found: {checkpoint_path}"
+
+    model = _create_model(os.path.join(model_dir, _MODEL_CONFIG_NAME))
+    model.set_nbatch(nbatch)
+    model.set_scheduler()
+
+    strategies = [
+        ('direct',            lambda sd: sd),
+        ('old-pytorch-keys',  lambda sd: adapt_ckpt_to_model_key(model, sd)),
+        ('remove-module',     lambda sd: adapt_ckpt_module_to_model_key(model, sd)),
+    ]
+
+    checkpoint = torch.load(checkpoint_path, weights_only=True)
+    for name, transform_fn in strategies:
+        try:
+            logging.info(f'Loading weights ({name})…')
+            model.load_state_dict(transform_fn(checkpoint))
+            logging.info(f'Success with strategy: {name}.')
+            return model
+        except Exception:
+            pass
+
+    raise RuntimeError(f"All loading strategies failed for checkpoint: {checkpoint_path}")
+
+
+def load_opt(model_dir: str, model, epoch: int):
+    """Load optimiser state into *model*, moving tensors to the model's device."""
+    sd_dir = _state_dict_dir(model_dir)
+    opt_path = os.path.join(sd_dir, f'optimizer_{epoch}.pt')
     try:
-        logging.info('Loading weights as is...')
-        model.load_state_dict(torch.load(checkpoint_path, weights_only=True))
-    except:
-        logging.info('Adapting keys name while loading ckpt weights...')
-        state_dict = adapt_ckpt_to_model_key(model, torch.load(checkpoint_path, weights_only=True))
-        #state_dict = _fix_key_names(torch.load(checkpoint_path, weights_only=True))
-        model.load_state_dict(state_dict)
+        assert os.path.isfile(opt_path)
+        actual = model.mmodel if hasattr(model, 'mmodel') else model
+        device = next(actual.parameters()).device
+        state  = torch.load(opt_path, map_location='cpu')
+        for s in state['state'].values():
+            for k, v in s.items():
+                if torch.is_tensor(v):
+                    s[k] = v.to(device)
+        actual.optim.load_state_dict(state)
+        logging.info('Optimiser loaded.')
+    except Exception as exc:
+        logging.info(f'Could not load optimiser: {exc}')
+
+
+def load_sched(model_dir: str, model, epoch: int):
+    """Load scheduler state into *model*."""
+    sd_dir   = _state_dict_dir(model_dir)
+    sch_path = os.path.join(sd_dir, f'scheduler_{epoch}.pt')
+    try:
+        assert os.path.isfile(sch_path)
+        actual = model.mmodel if hasattr(model, 'mmodel') else model
+        actual.lr_scheduler.load_state_dict(
+            torch.load(sch_path, map_location='cpu')
+        )
+        logging.info('Scheduler loaded.')
+    except Exception as exc:
+        logging.info(f'Could not load scheduler: {exc}')
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint key-adaptation utilities
+# ---------------------------------------------------------------------------
+
+def adapt_ckpt_module_to_model_key(model: BaseModel, state_dict: dict) -> dict:
+    """Remove 'module.' prefixes added by DataParallel wrapping."""
+    return {k.replace('module.', ''): v for k, v in state_dict.items()}
+
+
+def adapt_ckpt_to_model_key(model: BaseModel, checkpoint: dict) -> dict:
+    """
+    Translate PyTorch 2.3.x weight_norm parametrization keys to 2.0.x convention.
+    """
+    new_sd = {}
+    for k, v in checkpoint.items():
+        if '.parametrizations.' in k and (k.endswith('.original0') or k.endswith('.original1')):
+            suffix = '_g' if k.endswith('.original0') else '_v'
+            for weight_name in ('weight_hh_l0', 'weight_ih_l0'):
+                old_pattern = f'.parametrizations.{weight_name}.original{"0" if suffix == "_g" else "1"}'
+                if old_pattern in k:
+                    new_k = k.replace(old_pattern, f'.{weight_name}{suffix}')
+                    break
+            else:
+                new_k = k  # fallback: keep as-is
+            new_sd[new_k] = v
+        else:
+            new_sd[k] = v
+    return new_sd
+
+
+
+
+# ---------------------------------------------------------------------------
+# Device-transfer helpers (used when loading from CPU checkpoints)
+# ---------------------------------------------------------------------------
+
+def _move_optimizer_to_device(model, device):
+    for state in model.optim.state.values():
+        for k, v in state.items():
+            if isinstance(v, torch.Tensor):
+                state[k] = v.to(device)
     return model
 
-# fix key names for hmdnemo or hmd-poser-ext
-def _fix_key_names(state_dict: dict):
-    return {k.replace('_orig_mod.', ''): v for k, v in state_dict.items()}
-def check_discr_keys(model:base.BaseModel, checkpoint:dict, nlines:int = 50):
-    model_keys = sorted(model.state_dict().keys())
-    ckpt_keys = sorted(checkpoint.keys())
-    
-    # Get sets for quick diff
-    model_only = sorted(set(model_keys) - set(ckpt_keys))
-    ckpt_only = sorted(set(ckpt_keys) - set(model_keys))
 
-    max_len = max(len(model_only), len(ckpt_only))
-
-    print("\n🔍 Keys only in model or checkpoint (side by side):\n")
-    print(f"{'MODEL ONLY KEYS':<60} | {'CHECKPOINT ONLY KEYS'}")
-    print("-" * 120)
-
-    for i in range(min(max_len, nlines)):
-        m_key = model_only[i] if i < len(model_only) else ""
-        c_key = ckpt_only[i] if i < len(ckpt_only) else ""
-        print(f"{m_key:<60} | {c_key}")
-
-    print("\n✅ Finished listing keys only in one of the two.\n")
-def adapt_ckpt_to_model_key(model, checkpoint):
-    #pytorch 2.3.1 -> 2.0.1
-    model_keys = sorted(model.state_dict().keys())
-    ckpt_keys_raw = sorted(checkpoint.keys())
-    suffix = '.parametrizations.weight_norm.original'
-
-    new_state_dict = {}
-
-    for k, v in checkpoint.items():
-        if '.parametrizations.' in k and (
-            k.endswith('.original0') or k.endswith('.original1')
-        ):
-            # Figure out if it's original0 or original1
-            if k.endswith('.original0'):
-                suffix_new = '_g'
-                k_base = k[:-len('.parametrizations.weight_hh_l0.original0')]
-                if 'weight_hh_l0' in k:
-                    k_base = k.replace('.parametrizations.weight_hh_l0.original0', '')
-                    new_k = f"{k_base}.weight_hh_l0_g"
-                elif 'weight_ih_l0' in k:
-                    k_base = k.replace('.parametrizations.weight_ih_l0.original0', '')
-                    new_k = f"{k_base}.weight_ih_l0_g"
-                else:
-                    new_k = k  # fallback, keep as-is
-            elif k.endswith('.original1'):
-                suffix_new = '_v'
-                if 'weight_hh_l0' in k:
-                    k_base = k.replace('.parametrizations.weight_hh_l0.original1', '')
-                    new_k = f"{k_base}.weight_hh_l0_v"
-                elif 'weight_ih_l0' in k:
-                    k_base = k.replace('.parametrizations.weight_ih_l0.original1', '')
-                    new_k = f"{k_base}.weight_ih_l0_v"
-                else:
-                    new_k = k
-            else:
-                new_k = k
-
-            #logging.info(f"Adapting: {k} -> {new_k}")
-            new_state_dict[new_k] = v
-        else:
-            #copy value
-            new_state_dict[k] = v
-        
-    return new_state_dict
+def _move_scheduler_to_device(model, device):
+    for state in model.lr_scheduler.optimizer.state.values():
+        for k, v in state.items():
+            if isinstance(v, torch.Tensor):
+                state[k] = v.to(device)
+    return model

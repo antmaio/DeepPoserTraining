@@ -1,0 +1,110 @@
+{
+    "joint_parameters": [
+        {
+            "joint_id": 0,
+            "joint_name": "nose",
+            "process_noise": 0.01,
+            "measurement_noise": 0.1
+        },
+        {
+            "joint_id": 1,
+            "joint_name": "left_eye",
+            "process_noise": 0.01,
+            "measurement_noise": 0.2
+        },
+        {
+            "joint_id": 2,
+            "joint_name": "right_eye",
+            "process_noise": 0.01,
+            "measurement_noise": 0.1
+        },
+        {
+            "joint_id": 3,
+            "joint_name": "left_ear",
+            "process_noise": 0.01,
+            "measurement_noise": 0.2
+        },
+        {
+            "joint_id": 4,
+            "joint_name": "right_ear",
+            "process_noise": 0.01,
+            "measurement_noise": 0.1
+        },
+        {
+            "joint_id": 5,
+            "joint_name": "left_shoulder",
+            "process_noise": 0.001,
+            "measurement_noise": 0.5
+        },
+        {
+            "joint_id": 6,
+            "joint_name": "right_shoulder",
+            "process_noise": 0.001,
+            "measurement_noise": 0.5
+        },
+        {
+            "joint_id": 7,
+            "joint_name": "left_elbow",
+            "process_noise": 0.001,
+            "measurement_noise": 0.5
+        },
+        {
+            "joint_id": 8,
+            "joint_name": "right_elbow",
+            "process_noise": 0.001,
+            "measurement_noise": 0.5
+        },
+        {
+            "joint_id": 9,
+            "joint_name": "left_wrist",
+            "process_noise": 0.001,
+            "measurement_noise": 0.5
+        },
+        {
+            "joint_id": 10,
+            "joint_name": "right_wrist",
+            "process_noise": 0.001,
+            "measurement_noise": 0.5
+        },
+        {
+            "joint_id": 11,
+            "joint_name": "left_hip",
+            "process_noise": 0.001,
+            "measurement_noise": 0.5
+        },
+        {
+            "joint_id": 12,
+            "joint_name": "right_hip",
+            "process_noise": 0.001,
+            "measurement_noise": 0.5
+        },
+        {
+            "joint_id": 13,
+            "joint_name": "left_knee",
+            "process_noise": 0.001,
+            "measurement_noise": 0.5
+        },
+        {
+            "joint_id": 14,
+            "joint_name": "right_knee",
+            "process_noise": 0.001,
+            "measurement_noise": 0.5
+        },
+        {
+            "joint_id": 15,
+            "joint_name": "left_ankle",
+            "process_noise": 0.001,
+            "measurement_noise": 0.5
+        },
+        {
+            "joint_id": 16,
+            "joint_name": "right_ankle",
+            "process_noise": 0.001,
+            "measurement_noise": 0.5
+        }
+    ],
+    "description": "Kalman filter parameters for 17 COCO keypoints. Process noise: 0.01 for first 5 joints (head), 0.005 for limbs. Measurement noise: 0.1 for even joints, 0.2 for odd joints.",
+    "njoints": 17,
+    "default_dt": 0.0166667,
+    "version": "1.0"
+}

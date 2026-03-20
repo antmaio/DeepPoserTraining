@@ -1,347 +1,484 @@
 """
 Inspired by https://github.com/zxz267/AvatarJLM
 """
-#External
-import numpy as np 
-import torch
+# External
 import os
 import glob
 import pickle
+
+import numpy as np
+import torch
 from sklearn.cluster import DBSCAN
-#Internal
+
+# Internal
 from human_body_prior.tools.rotation_tools import aa2matrot, local2global_pose
 from data.yolo_data_gen import run_yolo
 from data.data_config import SMPL_JOINTS
-from data.utils_mmpose import _MODEL_STR_
 from utils import utils_transform
+from utils import _utils_transform
+from anim.data.amass import SmplxJoints
 
-DISCARD_TERRAIN_SEQUENCES = True # throw away sequences where the person steps onto objects (determined by a heuristic)
-DISCARD_SHORTER_THAN = 1.0 # seconds
+# ---------------------------------------------------------------------------
+# Global thresholds
+# ---------------------------------------------------------------------------
 
-# for determining floor height
+DISCARD_TERRAIN_SEQUENCES = True   # discard sequences where person steps onto objects
+DISCARD_SHORTER_THAN = 1.0         # seconds
+
 FLOOR_VEL_THRESH = 0.005
 FLOOR_HEIGHT_OFFSET = 0.01
-# for determining contacts
-CONTACT_VEL_THRESH = 0.005 #0.015
+
+CONTACT_VEL_THRESH = 0.005
 CONTACT_TOE_HEIGHT_THRESH = 0.04
 CONTACT_ANKLE_HEIGHT_THRESH = 0.08
-# for determining terrain interaction
-TERRAIN_HEIGHT_THRESH = 0.04 # if static toe is above this height
-ROOT_HEIGHT_THRESH = 0.04 # if maximum "static" root height is more than this + root_floor_height
-CLUSTER_SIZE_THRESH = 0.25 # if cluster has more than this faction of fps (30 for 120 fps)
+
+TERRAIN_HEIGHT_THRESH = 0.04
+ROOT_HEIGHT_THRESH = 0.04
+CLUSTER_SIZE_THRESH = 0.25         # fraction of FPS
 
 
-def detect_joint_contact(body_joint_seq, joint_name, floor_height, vel_thresh, height_thresh):
-    # calc velocity
+# ---------------------------------------------------------------------------
+# File-path helpers
+# ---------------------------------------------------------------------------
+
+def old_to_new_func(path: str) -> str:
+    """Translate legacy SMPL file-path conventions to SMPLX conventions."""
+    return (
+        path.rstrip('\n')
+            .replace('BioMotionLab_NTroje', 'BMLrub')
+            .replace('MPI_HDM05', 'HDM05')
+            .replace('poses', 'stageii')
+            .replace('/', os.sep)
+    )
+
+
+def exclusion_func(path: str, verbose: bool = False) -> bool:
+    """Return False (exclude) if *path* contains a known bad subject name."""
+    for name in ('Rory', 'Justin', 'rory', 'justin', 'neutral'):
+        if name in path:
+            if verbose:
+                print(f"Skipped '{path}'")
+            return False
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Contact / floor helpers
+# ---------------------------------------------------------------------------
+
+def _joint_velocity(seq: np.ndarray) -> np.ndarray:
+    """Frame-wise L2 velocity; last frame duplicates the previous delta."""
+    vel = np.linalg.norm(seq[1:] - seq[:-1], axis=1)
+    return np.append(vel, vel[-1])
+
+
+def detect_joint_contact(body_joint_seq: np.ndarray, joint_name: str,
+                         floor_height: float, vel_thresh: float,
+                         height_thresh: float) -> np.ndarray:
+    """Binary contact mask for a single joint based on velocity + height."""
     joint_seq = body_joint_seq[:, SMPL_JOINTS[joint_name], :]
-    joint_vel = np.linalg.norm(joint_seq[1:] - joint_seq[:-1], axis=1)
-    joint_vel = np.append(joint_vel, joint_vel[-1])
-    # determine contact by velocity
-    joint_contact = joint_vel < vel_thresh
-    # compute heights
-    joint_heights = joint_seq[:, 2] - floor_height
-    # compute contact by vel + height
-    joint_contact = np.logical_and(joint_contact, joint_heights < height_thresh)
+    vel = _joint_velocity(joint_seq)
+    heights = joint_seq[:, 2] - floor_height
+    return np.logical_and(vel < vel_thresh, heights < height_thresh)
 
-    return joint_contact
 
-def determine_floor_height_and_contacts(body_joint_seq, fps):
-    '''
-    Input: body_joint_seq N x 21 x 3 numpy array
-    Contacts are N x 4 where N is number of frames and each row is left heel/toe, right heel/toe
-    '''
+def determine_floor_height_and_contacts(body_joint_seq: np.ndarray, fps: float):
+    """
+    Estimate floor height via foot-velocity clustering and compute foot contacts.
+
+    Args:
+        body_joint_seq: (N, 22, 3) array of joint positions.
+        fps:            Recording frame rate.
+
+    Returns:
+        offset_floor_height (float),
+        contacts            (N, 22) binary array,
+        discard_seq         (bool).
+    """
     num_frames = body_joint_seq.shape[0]
 
-    # compute toe velocities
-    root_seq = body_joint_seq[:, SMPL_JOINTS['hips'], :]
-    left_toe_seq = body_joint_seq[:, SMPL_JOINTS['leftToeBase'], :]
+    # ---- toe velocities and heights ----
+    left_toe_seq  = body_joint_seq[:, SMPL_JOINTS['leftToeBase'], :]
     right_toe_seq = body_joint_seq[:, SMPL_JOINTS['rightToeBase'], :]
-    left_toe_vel = np.linalg.norm(left_toe_seq[1:] - left_toe_seq[:-1], axis=1)
-    left_toe_vel = np.append(left_toe_vel, left_toe_vel[-1])
-    right_toe_vel = np.linalg.norm(right_toe_seq[1:] - right_toe_seq[:-1], axis=1)
-    right_toe_vel = np.append(right_toe_vel, right_toe_vel[-1])
+    root_seq      = body_joint_seq[:, SMPL_JOINTS['hips'], :]
 
-    # now foot heights (z is up)
-    left_toe_heights = left_toe_seq[:, 2]
+    left_toe_vel  = _joint_velocity(left_toe_seq)
+    right_toe_vel = _joint_velocity(right_toe_seq)
+
+    left_toe_heights  = left_toe_seq[:, 2]
     right_toe_heights = right_toe_seq[:, 2]
-    root_heights = root_seq[:, 2]
+    root_heights      = root_seq[:, 2]
 
+    # ---- cluster static foot heights to find the floor ----
+    all_inds = np.arange(num_frames)
+    left_static_mask  = left_toe_vel < FLOOR_VEL_THRESH
+    right_static_mask = right_toe_vel < FLOOR_VEL_THRESH
 
-    # filter out heights when velocity is greater than some threshold (not in contact)
-    all_inds = np.arange(left_toe_heights.shape[0])
-    left_static_foot_heights = left_toe_heights[left_toe_vel < FLOOR_VEL_THRESH]
-    left_static_inds = all_inds[left_toe_vel < FLOOR_VEL_THRESH]
-    right_static_foot_heights = right_toe_heights[right_toe_vel < FLOOR_VEL_THRESH]
-    right_static_inds = all_inds[right_toe_vel < FLOOR_VEL_THRESH]
-
-    all_static_foot_heights = np.append(left_static_foot_heights, right_static_foot_heights)
-    all_static_inds = np.append(left_static_inds, right_static_inds)
-
+    all_static_heights = np.concatenate([
+        left_toe_heights[left_static_mask],
+        right_toe_heights[right_static_mask],
+    ])
+    all_static_inds = np.concatenate([
+        all_inds[left_static_mask],
+        all_inds[right_static_mask],
+    ])
 
     discard_seq = False
-    if all_static_foot_heights.shape[0] > 0:
-        cluster_heights = []
-        cluster_root_heights = []
-        cluster_sizes = []
-        # cluster foot heights and find one with smallest median
-        clustering = DBSCAN(eps=0.005, min_samples=3).fit(all_static_foot_heights.reshape(-1, 1))
-        all_labels = np.unique(clustering.labels_)
-        # print(all_labels)
+    if all_static_heights.size > 0:
+        clustering = DBSCAN(eps=0.005, min_samples=3).fit(all_static_heights.reshape(-1, 1))
+        labels = clustering.labels_
+
         min_median = min_root_median = float('inf')
-        for cur_label in all_labels:
-            cur_clust = all_static_foot_heights[clustering.labels_ == cur_label]
-            cur_clust_inds = np.unique(all_static_inds[clustering.labels_ == cur_label]) # inds in the original sequence that correspond to this cluster
-            # get median foot height and use this as height
-            cur_median = np.median(cur_clust)
-            cluster_heights.append(cur_median)
-            cluster_sizes.append(cur_clust.shape[0])
+        cluster_info = []  # (height_median, root_median, size)
 
-            # get root information
-            cur_root_clust = root_heights[cur_clust_inds]
-            cur_root_median = np.median(cur_root_clust)
-            cluster_root_heights.append(cur_root_median)
+        for label in np.unique(labels):
+            mask = labels == label
+            clust_heights = all_static_heights[mask]
+            clust_inds    = np.unique(all_static_inds[mask])
 
-            # update min info
-            if cur_median < min_median:
-                min_median = cur_median
-                min_root_median = cur_root_median
+            h_median    = np.median(clust_heights)
+            root_median = np.median(root_heights[clust_inds])
+            size        = clust_heights.size
 
-        floor_height = min_median 
-        offset_floor_height = floor_height - FLOOR_HEIGHT_OFFSET # toe joint is actually inside foot mesh a bit
+            cluster_info.append((h_median, root_median, size))
+
+            if h_median < min_median:
+                min_median     = h_median
+                min_root_median = root_median
+
+        floor_height        = min_median
+        offset_floor_height = floor_height - FLOOR_HEIGHT_OFFSET
 
         if DISCARD_TERRAIN_SEQUENCES:
-            # print(min_median + TERRAIN_HEIGHT_THRESH)
-            # print(min_root_median + ROOT_HEIGHT_THRESH)
-            for cluster_root_height, cluster_height, cluster_size in zip (cluster_root_heights, cluster_heights, cluster_sizes):
-                root_above_thresh = cluster_root_height > (min_root_median + ROOT_HEIGHT_THRESH)
-                toe_above_thresh = cluster_height > (min_median + TERRAIN_HEIGHT_THRESH)
-                cluster_size_above_thresh = cluster_size > int(CLUSTER_SIZE_THRESH*fps)
-                if root_above_thresh and toe_above_thresh and cluster_size_above_thresh:
+            for h_med, root_med, size in cluster_info:
+                if (
+                    root_med > min_root_median + ROOT_HEIGHT_THRESH
+                    and h_med  > min_median     + TERRAIN_HEIGHT_THRESH
+                    and size   > int(CLUSTER_SIZE_THRESH * fps)
+                ):
                     discard_seq = True
                     print('DISCARDING sequence based on terrain interaction!')
                     break
     else:
         floor_height = offset_floor_height = 0.0
 
-    # now find contacts (feet are below certain velocity and within certain range of floor)
-    # compute heel velocities
-    left_heel_seq = body_joint_seq[:, SMPL_JOINTS['leftFoot'], :]
+    # ---- heel velocities and heights ----
+    left_heel_seq  = body_joint_seq[:, SMPL_JOINTS['leftFoot'], :]
     right_heel_seq = body_joint_seq[:, SMPL_JOINTS['rightFoot'], :]
-    left_heel_vel = np.linalg.norm(left_heel_seq[1:] - left_heel_seq[:-1], axis=1)
-    left_heel_vel = np.append(left_heel_vel, left_heel_vel[-1])
-    right_heel_vel = np.linalg.norm(right_heel_seq[1:] - right_heel_seq[:-1], axis=1)
-    right_heel_vel = np.append(right_heel_vel, right_heel_vel[-1])
+    left_heel_vel  = _joint_velocity(left_heel_seq)
+    right_heel_vel = _joint_velocity(right_heel_seq)
 
-    left_heel_contact = left_heel_vel < CONTACT_VEL_THRESH
-    right_heel_contact = right_heel_vel < CONTACT_VEL_THRESH
-    left_toe_contact = left_toe_vel < CONTACT_VEL_THRESH
-    right_toe_contact = right_toe_vel < CONTACT_VEL_THRESH
-
-    # compute heel heights
-    left_heel_heights = left_heel_seq[:, 2] - floor_height
+    left_heel_heights  = left_heel_seq[:, 2]  - floor_height
     right_heel_heights = right_heel_seq[:, 2] - floor_height
-    left_toe_heights =  left_toe_heights - floor_height
-    right_toe_heights =  right_toe_heights - floor_height
+    left_toe_heights   = left_toe_heights      - floor_height
+    right_toe_heights  = right_toe_heights     - floor_height
 
-    left_heel_contact = np.logical_and(left_heel_contact, left_heel_heights < CONTACT_ANKLE_HEIGHT_THRESH)
-    right_heel_contact = np.logical_and(right_heel_contact, right_heel_heights < CONTACT_ANKLE_HEIGHT_THRESH)
-    left_toe_contact = np.logical_and(left_toe_contact, left_toe_heights < CONTACT_TOE_HEIGHT_THRESH)
-    right_toe_contact = np.logical_and(right_toe_contact, right_toe_heights < CONTACT_TOE_HEIGHT_THRESH)
-
+    # ---- contact masks (velocity + height) ----
     contacts = np.zeros((num_frames, len(SMPL_JOINTS)))
-    contacts[:,SMPL_JOINTS['leftFoot']] = left_heel_contact
-    contacts[:,SMPL_JOINTS['leftToeBase']] = left_toe_contact
-    contacts[:,SMPL_JOINTS['rightFoot']] = right_heel_contact
-    contacts[:,SMPL_JOINTS['rightToeBase']] = right_toe_contact
+    contacts[:, SMPL_JOINTS['leftFoot']]     = np.logical_and(left_heel_vel  < CONTACT_VEL_THRESH, left_heel_heights  < CONTACT_ANKLE_HEIGHT_THRESH)
+    contacts[:, SMPL_JOINTS['rightFoot']]    = np.logical_and(right_heel_vel < CONTACT_VEL_THRESH, right_heel_heights < CONTACT_ANKLE_HEIGHT_THRESH)
+    contacts[:, SMPL_JOINTS['leftToeBase']]  = np.logical_and(left_toe_vel   < CONTACT_VEL_THRESH, left_toe_heights   < CONTACT_TOE_HEIGHT_THRESH)
+    contacts[:, SMPL_JOINTS['rightToeBase']] = np.logical_and(right_toe_vel  < CONTACT_VEL_THRESH, right_toe_heights  < CONTACT_TOE_HEIGHT_THRESH)
 
-    # hand contacts
-    left_hand_contact = detect_joint_contact(body_joint_seq, 'leftHand', floor_height, CONTACT_VEL_THRESH, CONTACT_ANKLE_HEIGHT_THRESH)
-    right_hand_contact = detect_joint_contact(body_joint_seq, 'rightHand', floor_height, CONTACT_VEL_THRESH, CONTACT_ANKLE_HEIGHT_THRESH)
-    contacts[:,SMPL_JOINTS['leftHand']] = left_hand_contact
-    contacts[:,SMPL_JOINTS['rightHand']] = right_hand_contact
-
-    # knee contacts
-    left_knee_contact = detect_joint_contact(body_joint_seq, 'leftLeg', floor_height, CONTACT_VEL_THRESH, CONTACT_ANKLE_HEIGHT_THRESH)
-    right_knee_contact = detect_joint_contact(body_joint_seq, 'rightLeg', floor_height, CONTACT_VEL_THRESH, CONTACT_ANKLE_HEIGHT_THRESH)
-    contacts[:,SMPL_JOINTS['leftLeg']] = left_knee_contact
-    contacts[:,SMPL_JOINTS['rightLeg']] = right_knee_contact
+    for joint_name, col in [('leftHand', 'leftHand'), ('rightHand', 'rightHand'),
+                             ('leftLeg',  'leftLeg'),  ('rightLeg',  'rightLeg')]:
+        contacts[:, SMPL_JOINTS[col]] = detect_joint_contact(
+            body_joint_seq, joint_name, floor_height,
+            CONTACT_VEL_THRESH, CONTACT_ANKLE_HEIGHT_THRESH,
+        )
 
     return offset_floor_height, contacts, discard_seq
 
 
-def syn_acc(v, smooth_n=4):
-    """
-    Synthesize accelerations from vertex positions.
-    """
+# ---------------------------------------------------------------------------
+# IMU synthesis
+# ---------------------------------------------------------------------------
+
+def syn_acc(v: torch.Tensor, smooth_n: int = 4) -> torch.Tensor:
+    """Synthesise accelerations from vertex positions (simple finite differences)."""
     mid = smooth_n // 2
-    acc = torch.stack([(v[i] + v[i + 2] - 2 * v[i + 1]) * 3600 for i in range(0, v.shape[0] - 2)])
-    acc = torch.cat((torch.zeros_like(acc[:1]), acc, torch.zeros_like(acc[:1])))
+    acc = torch.stack([(v[i] + v[i + 2] - 2 * v[i + 1]) * 3600
+                       for i in range(v.shape[0] - 2)])
+    acc = torch.cat([torch.zeros_like(acc[:1]), acc, torch.zeros_like(acc[:1])])
     if mid != 0 and v.shape[0] >= 8:
-        acc[smooth_n:-smooth_n] = torch.stack(
-            [(v[i] + v[i + smooth_n * 2] - 2 * v[i + smooth_n]) * 3600 / smooth_n ** 2
-             for i in range(0, v.shape[0] - smooth_n * 2)])
+        acc[smooth_n:-smooth_n] = torch.stack([
+            (v[i] + v[i + smooth_n * 2] - 2 * v[i + smooth_n]) * 3600 / smooth_n ** 2
+            for i in range(v.shape[0] - smooth_n * 2)
+        ])
     return acc
 
-def process(src, dst, body_models, logging, camera_path, MV, split_file=None, **kwargs):
-    assert src and dst
-    
-    rotation_local_full_gt_list = []
-    hmd_position_global_full_gt_list = []
-    body_parms_list = []
-    head_global_trans_list = []
 
+# ---------------------------------------------------------------------------
+# SMPL / SMPLX body-parameter extraction
+# ---------------------------------------------------------------------------
+
+_JREG_PATH = os.path.join('data', 'J_regressor_coco.npy')
+_IMU_JOINT_MASK   = [18, 19, 4, 5, 15, 0]
+_IMU_VERTEX_MASK  = [1961, 5424, 1176, 4662, 411, 3021]
+
+
+def _load_jregressor() -> torch.Tensor:
+    return torch.tensor(np.load(_JREG_PATH), dtype=torch.float32)
+
+
+def _extract_smpl(bdata, body_models: dict, stride: int, device: str):
+    """Extract body parameters and run forward pass for SMPL topology."""
+    body_model = body_models['male']  # gender-agnostic for now
+    poses = bdata['poses'][::stride]
+    trans = bdata['trans'][::stride]
+    gender = bdata['gender']
+    
+    body_parms = {
+        'root_orient': torch.tensor(poses[:, :3],   dtype=torch.float32, device=device),
+        'pose_body':   torch.tensor(poses[:, 3:66], dtype=torch.float32, device=device),
+        'trans':       torch.tensor(trans,          dtype=torch.float32, device=device),
+    }
+    with torch.no_grad():
+        output = body_model(**body_parms)
+
+    return poses, output.v.cpu(), output.Jtr.cpu(), body_parms, gender
+
+
+def _extract_smplx(bdata, body_models: dict, stride: int, device: str):
+    """Extract body parameters and run forward pass for SMPLX topology."""
+    body_model = body_models['neutral'].to(device)
+    trans        = torch.tensor(bdata['trans'],       dtype=torch.float32)[::stride].to(device)
+    root_aa      = torch.tensor(bdata['root_orient'][::stride], dtype=torch.float32)
+    body_aa      = torch.tensor(bdata['pose_body'][::stride],   dtype=torch.float32)
+
+    global_orient = utils_transform.angle_axis_to_matrix(root_aa).to(device)
+    body_pose     = utils_transform.angle_axis_to_matrix(
+        body_aa.reshape(trans.shape[0], -1, 3)
+    ).to(device)
+
+    body_parms = {
+        'global_orient': global_orient,
+        'pose_body':     body_pose,
+        'trans':         trans,
+    }
+    with torch.no_grad():
+        output = body_model(global_orient=global_orient, body_pose=body_pose, transl=trans)
+
+    # Re-pack poses as a single tensor to mirror the SMPL branch
+    poses = torch.cat([root_aa, body_aa], dim=-1).numpy()
+    return poses, output.vertices.cpu(), output.joints.cpu(), body_parms, 'neutral'
+
+
+def _compute_rotations(poses, topology: str, body_model, global_orient=None, body_pose=None):
+    """Return (rotation_local_6d, rotation_global_matrot) for either topology."""
+    if topology == 'smpl':
+        full_rot_aa = torch.tensor(poses[:, :66])
+    else:
+        full_rot_aa = torch.tensor(poses)
+
+    output_6d = _utils_transform.aa2sixd(full_rot_aa.reshape(-1, 3))
+    rotation_local_6d = output_6d.reshape(poses.shape[0], -1)[1:]
+
+    rotation_local_matrot = aa2matrot(torch.tensor(poses).reshape(-1, 3)).reshape(
+        poses.shape[0], -1, 9
+    )
+    if topology == 'smpl':
+        rotation_global_matrot = local2global_pose(
+            rotation_local_matrot, body_model.kintree_table[0].long()
+        )
+    else:
+        rotation_global_matrot = utils_transform.rotational_fk(global_orient, body_pose)
+
+    return rotation_local_6d, rotation_global_matrot
+
+
+# ---------------------------------------------------------------------------
+# Main processing entry point
+# ---------------------------------------------------------------------------
+
+def process(src: str, dst: str, body_models: dict, topology: str,
+            logging, camera_path: str, MV, split_file=None, **kwargs):
+    """
+    Process motion-capture files from *src* and write per-sequence .pkl files to *dst*.
+
+    Args:
+        src:         Root directory of the raw dataset.
+        dst:         Output directory for processed .pkl files.
+        body_models: Dict mapping gender/topology keys to BodyModel instances.
+        topology:    'smpl' or 'smplx'.
+        logging:     Python logging module (or compatible).
+        camera_path: Path to camera XML directory.
+        MV:          Initialised MeshViewer2 instance.
+        split_file:  Optional path to a text file listing relative file paths.
+        **kwargs:    Forwarded to run_yolo (e.g. yolo_model, yolo_model_str, topology).
+    """
+    assert src and dst
+
+    # ---- build file list ----
     if split_file is None:
-        all_file = glob.glob(os.path.join(src ,'**', '*.npz'), recursive=True)
+        all_files = sorted(glob.glob(os.path.join(src, '**', '*.npz'), recursive=True))
     else:
         with open(split_file, 'r') as f:
-            all_file = ['/'.join(src.split('/')[:-1] + [line.rstrip('\n')]) for line in f]
+            prefix = '/'.join(src.split('/')[:-1])
+            all_files = [f'{prefix}/{line.rstrip()}' for line in f]
+        if topology == 'smplx':
+            all_files = list(filter(exclusion_func, map(old_to_new_func, all_files)))
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    jregressor = _load_jregressor()
+    yolo_model     = kwargs.get('yolo_model')
+    yolo_model_str = kwargs.get('yolo_model_str')
+
+    mocap_rate_key = 'mocap_framerate' if topology == 'smpl' else 'mocap_frame_rate'
 
     idx = 0
-    for filepath in sorted(all_file):
-    
-        if os.path.exists(os.path.join(dst, f'{idx+1}.pkl')):
-            idx += 1
-            logging.info(f'File {os.path.join(dst, f"{idx}.pkl")} exists')
-            continue
+    for filepath in sorted(all_files):
 
-        #Init dict
-        data = dict()
-        data['pose_estimation_keypoints'] = dict()
+        # ---- skip already-processed files ----
+        idx += 1
+        out_path = os.path.join(dst, f'{idx}.pkl')
+        if os.path.exists(out_path):
+            logging.info(f'File {out_path} exists – skipping.')
+            continue
 
         bdata = np.load(filepath, allow_pickle=True)
-        try:
-            framerate = bdata["mocap_framerate"]
-        except:
-            logging.info(filepath, list(bdata.keys()))
-            continue
-        idx += 1
 
-        #if os.path.exists(os.path.join(dst, '{}.pkl'.format(idx))):
-            #continue
-        
+        try:
+            framerate = float(bdata[mocap_rate_key])
+        except KeyError:
+            logging.info(f'Missing frame-rate key in {filepath} – keys: {list(bdata.keys())}')
+            continue
+
         stride = round(framerate / 60)
 
-        bdata_poses = bdata["poses"][::stride,...]
-        bdata_trans = bdata["trans"][::stride,...]
-        subject_gender = bdata["gender"]
-        body_model = body_models["male"]  # body_models[str(subject_gender)]
+        # ---- forward pass ----
+        if topology == 'smpl':
+            poses, vertices, joints, body_parms, gender = _extract_smpl(
+                bdata, body_models, stride, device
+            )
+            rotation_global_matrot_args = dict(body_model=body_models['male'])
+        else:
+            poses, vertices, joints, body_parms, gender = _extract_smplx(
+                bdata, body_models, stride, device
+            )
+            rotation_global_matrot_args = dict(
+                body_model=None,
+                global_orient=body_parms['global_orient'],
+                body_pose=body_parms['pose_body'],
+            )
 
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        #device = 'cpu'
-        body_parms = {
-            'root_orient': torch.Tensor(bdata_poses[:, :3]).to(device),  # controls the global root orientation
-            'pose_body': torch.Tensor(bdata_poses[:, 3:66]).to(device),  # controls the body
-            'trans': torch.Tensor(bdata_trans).to(device),               # controls the global body position
+        if vertices.shape[0] <= 10:
+            continue  # skip very short sequences
+
+        # ---- rotations ----
+        rotation_local_6d, rotation_global_matrot = _compute_rotations(
+            poses, topology,
+            body_model=rotation_global_matrot_args.get('body_model'),
+            global_orient=rotation_global_matrot_args.get('global_orient'),
+            body_pose=rotation_global_matrot_args.get('body_pose'),
+        )
+
+        # ---- IMU synthesis ----
+        out_grot = rotation_global_matrot[:, _IMU_JOINT_MASK]
+        out_gacc = syn_acc(vertices[:, _IMU_VERTEX_MASK])
+
+        # ---- global 6-D rotations and velocities ----
+        head_rot_global = rotation_global_matrot[:, [15], :, :]
+        rotation_global_6d = _utils_transform.matrot2sixd(
+            rotation_global_matrot.reshape(-1, 3, 3)
+        ).reshape(*rotation_global_matrot.shape[:2], 6)
+
+        rotation_vel_matrot = torch.matmul(
+            torch.inverse(rotation_global_matrot[:-1]),
+            rotation_global_matrot[1:],
+        )
+        rotation_vel_6d = _utils_transform.matrot2sixd(
+            rotation_vel_matrot.reshape(-1, 3, 3)
+        ).reshape(*rotation_vel_matrot.shape[:2], 6)
+
+        # ---- joint positions ----
+        position_global = joints[:, :22, :]
+        position_head   = position_global[:, 15, :]
+
+        head_global_trans = torch.eye(4).repeat(position_head.shape[0], 1, 1)
+        head_global_trans[:, :3, :3] = head_rot_global.squeeze()
+        head_global_trans[:, :3,  3] = position_global[:, 15, :]
+
+        num_frames = position_global.shape[0] - 1
+
+        hmd_features = torch.cat([
+            rotation_global_6d[1:, :22].reshape(num_frames, -1),
+            rotation_vel_6d[:, :22].reshape(num_frames, -1),
+            position_global[1:, :22].reshape(num_frames, -1),
+            (position_global[1:, :22] - position_global[:-1, :22]).reshape(num_frames, -1),
+        ], dim=-1)
+
+        # ---- COCO joint projection ----
+        joints_coco = torch.einsum('bik,ji->bjk', vertices, jregressor)
+
+        # ---- assemble output dict ----
+        out = {
+            'rotation_local_full_gt_list':      rotation_local_6d.cpu(),
+            'hmd_position_global_full_gt_list': hmd_features.cpu(),
+            'body_parms_list':                  {k: v[1:].cpu() for k, v in body_parms.items()},
+            'head_global_trans_list':           head_global_trans[1:].cpu(),
+            'framerate':                        60,
+            'gender':                           gender,
+            'filepath':                         filepath,
+            'IMU_global_rotation':              out_grot.cpu()[1:],
+            'IMU_global_acceleration':          out_gacc.cpu()[1:],
+            'shape':                            bdata['betas'],
+            'pose_estimation_keypoints':        {},
         }
 
-        body_parms_list = body_parms
-        body_pose_world = body_model(**{k:v for k, v in body_parms.items() if k in ['pose_body', 'root_orient', 'trans']})
-        body_pose_world.v = body_pose_world.v.cpu()
-        body_pose_world.Jtr = body_pose_world.Jtr.cpu()
-
-        #ground truth in coco format
-        jreg_path = os.path.join('data', 'J_regressor_coco.npy') 
-        jregressor = torch.tensor(np.load(jreg_path), dtype=body_pose_world.v.dtype)
-        joints_coco = torch.einsum('bik,ji->bjk', [body_pose_world.v, jregressor])
-
-        output_aa = torch.Tensor(bdata_poses[:, :66]).reshape(-1,3)
-        output_6d = utils_transform.aa2sixd(output_aa).reshape(bdata_poses.shape[0],-1)
-        rotation_local_full_gt_list = output_6d[1:]
-        rotation_local_matrot = aa2matrot(torch.tensor(bdata_poses).reshape(-1,3)).reshape(bdata_poses.shape[0],-1,9)
-        rotation_global_matrot = local2global_pose(rotation_local_matrot, body_model.kintree_table[0].long()) # rotation of joints relative to the origin
-
-        # pass very short sequence
-        if body_pose_world.v.shape[0] <= 10:
-            continue
-        
-        # -------------------------------- get synthetic IMU data ----------------------------------
-        ji_mask = [18, 19, 4, 5, 15, 0]
-        vi_mask = [1961, 5424, 1176, 4662, 411, 3021]
-        out_grot = rotation_global_matrot[:, ji_mask]
-        out_gacc = syn_acc(body_pose_world.v[:, vi_mask])
-        # ------------------------------------------------------------------------------------------
-
-        head_rotation_global_matrot = rotation_global_matrot[:,[15],:,:]
-        rotation_global_6d = utils_transform.matrot2sixd(rotation_global_matrot.reshape(-1,3,3)).reshape(rotation_global_matrot.shape[0],-1,6)
-        input_rotation_global_6d = rotation_global_6d[1:,:22,:]
-        rotation_velocity_global_matrot = torch.matmul(torch.inverse(rotation_global_matrot[:-1]),rotation_global_matrot[1:])
-        rotation_velocity_global_6d = utils_transform.matrot2sixd(rotation_velocity_global_matrot.reshape(-1,3,3)).reshape(rotation_velocity_global_matrot.shape[0],-1,6)
-        input_rotation_velocity_global_6d = rotation_velocity_global_6d[:,:22,:]
-        position_global_full_gt_world = body_pose_world.Jtr[:,:22,:] # position of joints relative to the world origin
-
-        offset_floor_height, contacts, discard_seq = determine_floor_height_and_contacts(position_global_full_gt_world, 60)
-
-        position_head_world = position_global_full_gt_world[:,15,:] # world position of head
-        head_global_trans = torch.eye(4).repeat(position_head_world.shape[0],1,1)
-        head_global_trans[:,:3,:3] = head_rotation_global_matrot.squeeze()
-        head_global_trans[:,:3,3] = position_global_full_gt_world[:,15,:]
-
-        head_global_trans_list = head_global_trans[1:]
-
-        num_frames = position_global_full_gt_world.shape[0] - 1
-
-        hmd_position_global_full_gt_list = torch.cat([
-                                                                input_rotation_global_6d.reshape(num_frames,-1),
-                                                                input_rotation_velocity_global_6d.reshape(num_frames,-1),
-                                                                position_global_full_gt_world[1:, :22, :].reshape(num_frames,-1), 
-                                                                position_global_full_gt_world[1:, :22, :].reshape(num_frames,-1)-position_global_full_gt_world[:-1, :22, :].reshape(num_frames,-1)], dim=-1)
-        #print(str(idx), framerate, src, len(all_file), bdata["poses"].shape[0], hmd_position_global_full_gt_list.shape)
-
-        # -----------------------------------------------Cameras projection if required ----------------------------------------------
-        yolo_model = kwargs.get('yolo_model')
-        yolo_model_str = kwargs.get('yolo_model_str')
-        mm_pose_model = kwargs.get('mm_pose_model')
-
-        if yolo_model or mm_pose_model:
-
-            vcam_kp, confidences = run_yolo( 
-                mv=MV, 
-                bm=body_model, 
-                body_pose_world=body_pose_world,
-                nb_frames=num_frames, 
-                orig_file=filepath, 
-                frame_path=dst, 
+        # ---- optional YOLO pose estimation ----
+        if yolo_model is not None:
+            vcam_kp, confidences = run_yolo(
+                mv=MV,
+                bm=body_models.get('male') or body_models.get('neutral'),
+                body_pose_world=_get_body_pose_world(bdata, body_models, topology, stride, device),
+                nb_frames=num_frames,
+                orig_file=filepath,
+                frame_path=dst,
                 idx=idx,
                 camera_path=camera_path,
-                **kwargs
+                **kwargs,
             )
-        
-            if mm_pose_model:  
-                pose_estimation_keypoints = {'model_version': f'{_MODEL_STR_}'} 
-            elif yolo_model: 
-                pose_estimation_keypoints = {'model_version': f'{yolo_model_str}'}
+            kp_dict = {
+                'model_version': yolo_model_str,
+                'confidences':   torch.tensor(confidences[1:]),
+                'ground_truth':  joints_coco[1:],
+            }
+            for cam_idx, cam_data in enumerate(vcam_kp):
+                kp_dict[f'vcam{cam_idx}'] = torch.tensor(cam_data[1:])
+            out['pose_estimation_keypoints'] = kp_dict
 
-            pose_estimation_keypoints['conf'] = torch.Tensor(confidences[1:])
-            # Add each camera's keypoints dynamically
-            for cam_idx in range(len(vcam_kp)):
-                cam_key = f'vcam{cam_idx}'  # Creates keys like 'vcam0', 'vcam1', etc.
-                pose_estimation_keypoints[cam_key] = torch.Tensor(vcam_kp[cam_idx][1:])  # num_frames x 17 x 2
+        # ---- save ----
+        logging.info(f'Saving {out_path}')
+        with open(out_path, 'wb') as f:
+            pickle.dump(out, f)
 
-            # dict udpate            
-            data['pose_estimation_keypoints']['model_version'] =  pose_estimation_keypoints['model_version']
-            data['pose_estimation_keypoints']['confidences'] = pose_estimation_keypoints['conf']
-            data['pose_estimation_keypoints']['ground_truth'] = joints_coco[1:]
-            for cam_key in [k for k in pose_estimation_keypoints.keys() if k.startswith('vcam')]:
-                data['pose_estimation_keypoints'][cam_key] = pose_estimation_keypoints[cam_key]
-
-        body_parms_list = {k: v[1:].cpu() for k, v in body_parms_list.items()}
-
-        data['rotation_local_full_gt_list'] = rotation_local_full_gt_list.cpu()
-        data['hmd_position_global_full_gt_list'] = hmd_position_global_full_gt_list.cpu()
-        data['body_parms_list'] = body_parms_list
-        data['head_global_trans_list'] = head_global_trans_list.cpu()
-        data['framerate'] = 60
-        data['gender'] = subject_gender
-        data['filepath'] = filepath
-        data['IMU_global_rotation'] = out_grot.cpu()[1:]
-        data['IMU_global_acceleration'] = out_gacc.cpu()[1:]
-        data['shape'] = bdata["betas"]
-        data['offset_floor_height'] = offset_floor_height
-        data['contacts'] = contacts[1:]
+        torch.cuda.empty_cache()
 
 
-        # --- Save data preprocessed into pkl files ---
-        logging.info(f'File saved at {os.path.join(dst, f"{idx}.pkl")}')
-        with open(os.path.join(dst, '{}.pkl'.format(idx)), 'wb') as f:
-            pickle.dump(data, f)
+# ---------------------------------------------------------------------------
+# Internal helper
+# ---------------------------------------------------------------------------
 
+def _get_body_pose_world(bdata, body_models, topology, stride, device):
+    """Re-run the forward pass to obtain the body-pose mesh object for rendering."""
+    if topology == 'smpl':
+        poses = bdata['poses'][::stride]
+        parms = {
+            'root_orient': torch.tensor(poses[:, :3],               dtype=torch.float32, device=device),
+            'pose_body':   torch.tensor(poses[:, 3:66],             dtype=torch.float32, device=device),
+            'trans':       torch.tensor(bdata['trans'][::stride],   dtype=torch.float32, device=device),
+        }
+        with torch.no_grad():
+            return body_models['male'](**parms)
+    else:
+        body_model = body_models['neutral'].to(device)
+        trans      = torch.tensor(bdata['trans'][::stride],         dtype=torch.float32, device=device)
+        root_aa    = torch.tensor(bdata['root_orient'][::stride],   dtype=torch.float32, device=device)
+        body_aa    = torch.tensor(bdata['pose_body'][::stride],     dtype=torch.float32, device=device)
+        global_orient = utils_transform.angle_axis_to_matrix(root_aa).to(device)
+        body_pose     = utils_transform.angle_axis_to_matrix(
+            body_aa.reshape(trans.shape[0], -1, 3)
+        ).to(device)
+        with torch.no_grad():
+            return body_model(global_orient=global_orient, body_pose=body_pose, transl=trans)

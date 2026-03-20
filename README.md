@@ -1,128 +1,85 @@
 # OpenMPLPoser
 
-> Deep Learning-based framework for self-avatar animation from 18DoF sparse inputs extended with multiview 2D pose estimation.
+## 🚀 Overview
 
-## Table of Contents
-- [Installation](#installation)
-- [Usage](#usage)
-- [License](#license)
-- [Acknowledgements](#acknowledgements)
+OpenMPLPoser provides a pipeline for training and evaluating models that predict full-body human motion from sparse HMD inputs (head and hand positions) and optional external camera views. It features a clean configuration system, integrated Kalman filtering for temporal smoothness, and automated rendering utilities for visualization.
 
-## Installation
-1. Download desired subset of AMASS dataset from https://amass.is.tue.mpg.de/download.php. These folders must be placed into ```ROOT_DIR```
-2. Download body models from https://smpl-x.is.tue.mpg.de/download.php. The folders must be placed into ```SUPPORT_DIR```
-3. Clone the repository
+## 📦 Installation
+
+To set up the environment, you can use the provided `requirements.txt` or `environment.yml` files:
+
+### Using pip
 ```bash
-git clone https://github.com/antmaio/OpenMPLPoser.git
-cd OpenMPLPoser
+pip install -r requirements.txt
 ```
-4. Set up virtual environment
-```bash
-conda create -n YOURENV python=3.9
-conda activate YOURENV
-```
-5. Install the required environment via yaml file. Tested on Ubuntu 20.04, Python 3.9, Pytorch 2.0.1+cu118
+
+### Using Conda
 ```bash
 conda env create -f environment.yml
+conda activate openmplposer
 ```
 
-6. This project uses [MMPose](https://mmpose.readthedocs.io/en/latest/) and [Ultralytics](https://github.com/ultralytics/ultralytics) for pose estimation.
+## 🚀 Key Features
 
-If you haven’t installed them in step 5, you can do so with the following commands and versions:
+- **Hybrid Input Pipeline**: Supports head/hand trajectories (global/local) combined with external 3D joints (e.g., from YOLOv8-pose).
+- **Temporal-Spatial Architecture**: Uses a modular design with RNN/Transformer blocks for robust sequence modeling.
+- **Kalman Filtering Suite**: Integrated support for multiple Kalman filter variants (Constant Acceleration, Student's t, etc.) for online smoothing and occlusion handling.
+- **Unified Configuration**: Streamlined TOML-based configuration for data preparation, training, and evaluation.
+- **Automated Visualization**: Batch rendering of side-by-side comparison videos (AVI/MP4) with configurable time-scaling.
 
-7. Install OpenMPL_Private:
-```bash 
-git clone OpenMPL_Private.git
-```
-and place OpenMPL_Private into MPL_PATH, (e.g. in ./).
+## 📂 Repository Structure
 
-Download pretrained model from here and place into MPL_PRETRAINED_MODEL_PATH (e.g. in ./pretrained/xxx.pth).
+- **`anim/`**: Core logic and scripts.
+  - `train.py`: Main entry point for model training. Handles data loading, optimizer setup, and checkpointing.
+  - `test.py`: Fast evaluation script. Automatically loads the latest checkpoint and generates detailed MPJPE/MPJRE metrics.
+  - `render.py`: High-quality video generation utility for qualitative analysis.
+  - **`models/`**: 
+    - `architecture.py`: Definition of RNN/Transformer building blocks.
+    - `hmd_poser_ext_hmr_head_centered.py`: The flagship model implementation.
+    - `losses.py`: Comprehensive loss suite (FK-space loss, 6D rotation orthonormality, smoothness priors).
+  - **`data/`**: AMASS dataset integration and loading logic.
+- **`configs/`**: Standard TOML templates.
+  - `train.toml`: Global training hyperparameters.
+  - `prepare_data.toml`: Data ingestion settings (YOLO model, dataset paths).
+- **`filter_model/`**: A library of temporal filters for post-processing and online inference.
 
-#### Ultralytics
-Install with pip:
+## 🛠 Getting Started
+
+### 1. Data Preparation
+Configure your paths in `configs/prepare_data.toml` and ensure your AMASS dataset is accessible.
+
+### 2. Training
+Run the training script to begin optimization:
 ```bash
-pip install ultralytics==8.3.163
+python anim/train.py
 ```
-#### MMPose
-You can find the official installation instructions in the [MMPose documentation](https://mmpose.readthedocs.io/en/latest/installation.html). We recommand to build MMPose from source.
-The tested configuration for this project is:
-```bash
-mmcv==2.0.1
-mmdet==3.3.0
-mmengine==0.10.4
-mmpose==1.3.1
-mmpretrain==1.0.0
-```
-## Usage
+Settings are pulled from `configs/train.toml`. Logs and model checkpoints are saved to the `./temp` directory by default.
 
-#### Running data prerpocessing and pose estimation
-This command preprocesses data from amass, then apply multiviews 2D pose estimation on videos rendering. The virtual cameras parameters for rendering are defined in ./data/virtual_cameras/ 
-- Use --yolo_model YOLO_MODEL to specify the YOLO model path for pose estimation.
-- Or use --mm_pose_model to use the MMPose model as defined in the configuration file.
+### 3. Evaluation
+To evaluate a trained experiment:
 ```bash
-python -m data.prepare_data --root ROOT_DIR --protocol PROTOCOL --support_data SUPPORT_DIR --data_split DATA_SPLIT_DIR [--yolo_model YOLO_MODEL | --mm_pose_model]
+python anim/test.py temp/your_experiment_folder
 ```
-Example:
+By default, it loads the latest checkpoint and calculates MPJPE, MPJRE, and Jitter metrics on the test split.
+
+### 4. Rendering
+Visualize results by rendering AVI videos:
 ```bash
-python -m data.prepare_data --root ./amass --protocol 1 --support_data ./support_data --data_split ./data_split --yolo_model yolov8n-pose
+python anim/render.py temp/your_experiment_folder test --rec_idx 0 10
 ```
+This renders recordings 0 and 10 from the test split using the ground-truth comparison.
 
-#### multiviews 2D/3D pose lifter
-The methods to extract 3D positions from multiviews 2D keypoints and camera calibration are defined in ./pose_lifter 
-- Triangulation
- ```bash
-python -m pose_lifter.triang --dataset_type DATASET_TYPE --dataroot KEYPOINTS_DIR
-```
-- OpenMPL
- ```bash
-python -m pose_lifter.triang --dataset_type DATASET_TYPE --dataroot KEYPOINTS_DIR --mpl_path MPL_PATH --openmpl_ckpt MPL_PRETRAINED_MODEL_PATH 
-```
+## 📊 Configuration System
 
-KEYPOINTS_DIR is the directory of pickle files built from ```data.prepare_data```
+When training starts, the current configuration is "frozen" into a `run_config.json` file inside the save directory. Evaluation and rendering scripts use this file as their source of truth, ensuring that:
+1. Input data protocols (YOLO joints vs. ground-truth) are consistent.
+2. Model hyperparameters (RNN hidden size, number of transformer heads) match the weights.
+3. System parameters (device, dtype) are defaulted correctly.
 
-Example:
-```bash
-python -m pose_lifter.triang --dataset_type amass_p1 --dataroot ./data/keypoints/yolov8n-pose_protocol_1
-```
-or 
-```bash
-python -m pose_lifter.triang --dataset_type amass_p1 --dataroot ./data/keypoints/yolov8n-pose_protocol_1 --mpl_path ./OpenMPL_Private --openmpl_ckpt ./pretrained/mpl/td-hm_hrnet-w32_8xb64-210e_coco-384x288/model_best.pth.tar
-```
+## 🌊 Temporal Filtering
 
+Enable Kalman filtering by setting `with_kalman_filter = true` in your config. This applies a `ConstantAcc` (or similar) filter to predicted joint positions, significantly reducing high-frequency jitter in the output sequences.
 
-#### Self-avatar animation from sparse trackers and 3D keypoints
+## Citing
 
-- Training
-run 
-```bash
-python -m anim.train ANIM_MODEL --dataset DATASET_TYPE
-```
-Example:
-```bash
-python -m anim.train ./anim/data/model_configs/hmd-poser-ext.toml --dataset amass-p1 
-```
-- Evaluating 
-run 
-```bash
-python -m anim.test ANIM_MODEL_TRAINED DATASET_TYPE SPLIT --checkpoint CKPT --batch_size 1
-```
-Example:
-```bash
-python -m anim.test ./saves/hmd-poser-ext_25-6-25-11-20-58 amass-p1 test --checkpoint 400 --batch_size 1  
-```
-- Rendering 
-run 
-```bash
-python -m anim.render ANIM_MODEL_TRAINED DATASET_TYPE SPLIT --epoch CKPT --rec_idx REC_IDX
-```
-
-- ```ANIM_MODEL``` is the path to configuration TOML file for self-avatar animation model. 
-- ```ANIM_MODEL_TRAINED``` is the folder path related to the trained model.
-- ```SPLIT``` refers to the subset on which the model will be evaluated. 
-- ```CKPT``` is the model checkpoint to load
-- ```REC_IDX``` indicates which file id to render
-
-## License 
-
-## Acknowledgments
-Our implementation is inspired by the work of AvatarJLM . We thanks the authors for sharing their code. 
+Placeholder for citation.

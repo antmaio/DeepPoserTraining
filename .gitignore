@@ -1,34 +1,17 @@
-# YOLOv8 model weights
-*.pt
-*.pkl
-*.pyc
-*.npz
-*.npy
-*.avi
-*.png
-*.job
-*.txt
-*.json
-*.zip
-*.onnx
+# --- Python ---
+.cache/
+__pycache__/
 
-data/keypoints/
-data/__pycache__/
-yolo_bad_frames.txt
-.cache
-saves/
-temp/
-renders/
-data/mmpose_models/
-mmpose_output/
-pretrained/
-log/
-processed_images/
-onnx/*.onnx
+# --- Data & Body models ---
+/data/keypoints/
+support_data/
+/data/J_regressor_coco.npy
 
-pose_lifter/animate.py
+# --- Dependencies & Libs ---
+human_body_prior/
+psbody/
+body_visualizer/
 
-pose_lifter/J_regressor_coco.npy
-
-_*.py
-__*/
+# --- Outputs & Temp ---
+/renders/
+/temp/

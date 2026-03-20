@@ -14,6 +14,9 @@ import os
 from functools import reduce
 
 import numpy as np
+if np.__version__ > "2.0":
+    #monkey patch for numpy 2.0
+    np.infty = np.inf
 
 from . import colors
 from . import search
@@ -26,6 +29,7 @@ except ImportError:
 from . import landmarks
 from . import texture
 from . import processing
+
 
 
 __all__ = ["Mesh"]

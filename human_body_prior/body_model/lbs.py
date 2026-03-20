@@ -157,7 +157,7 @@ def vertices2landmarks(vertices, faces, lmk_faces_idx, lmk_bary_coords):
     lmk_vertices = vertices.view(-1, 3)[lmk_faces].view(
         batch_size, -1, 3, 3)
 
-    landmarks = torch.einsum('blfi,blf->bli', [lmk_vertices, lmk_bary_coords])
+    landmarks = torch.matmul(lmk_bary_coords.unsqueeze(2), lmk_vertices).squeeze(2)
     return landmarks
 
 
@@ -271,7 +271,7 @@ def vertices2joints(J_regressor, vertices):
         The location of the joints
     '''
 
-    return torch.einsum('bik,ji->bjk', [vertices, J_regressor])
+    return torch.matmul(J_regressor, vertices)
 
 
 def blend_shapes(betas, shape_disps):
@@ -296,7 +296,7 @@ def blend_shapes(betas, shape_disps):
     # then sum them.
 
     #print(betas.device,shape_disps.device)
-    blend_shape = torch.einsum('bl,mkl->bmk', [betas, shape_disps])
+    blend_shape = torch.matmul(betas, shape_disps.view(-1, shape_disps.shape[-1]).t()).view(betas.shape[0], -1, 3)
     return blend_shape
 
 

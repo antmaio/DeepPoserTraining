@@ -1,0 +1,6 @@
+[data_path]
+dataroot = "./data/keypoints/yolov8m-pose_protocol_1"
+output_dir = "triang"
+
+[dataset]
+type = "amass_p1"
