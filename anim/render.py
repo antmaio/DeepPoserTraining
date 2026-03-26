@@ -246,15 +246,17 @@ def main():
     rec_names = sorted(amass.get_dataset_recording_names_for_split(
         cfg, dataset_str, args.split, topology=topology))
     if args.rec_idx is not None:
+        #if rec_idx == -1, select a random recording
         rec_idx = (
             [random.randrange(len(rec_names))]
             if len(args.rec_idx) == 1 and args.rec_idx[0] < 0
-            else args.rec_idx
+            else args.rec_idx 
         )
         for r in rec_idx:
             assert 0 <= r < len(rec_names), f'rec_idx {r} out of range.'
             logging.info(f'Processing recording {rec_names[r]}')
     else:
+        #if rec_idx is None, select all recordings
         rec_idx = list(range(len(rec_names)))
         logging.info('Processing all recordings.')
 

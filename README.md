@@ -25,29 +25,43 @@ This environment has been tested with Python 3.9
 ## 🛠 Usage
 
 ### Data Preparation
+Configure your paths in `configs/prepare_data.toml` and ensure your AMASS dataset is accessible. You can define the virtual cameras parameters for video rendering in `data/virtual_cameras/`.
 
+Then, run:
 ```bash
-python anim/prepare_data.py --config configs/prepare_data.toml
+python -m anim.prepare_data --config configs/prepare_data.toml
 ```
 
 ### Training
+Training configuration is defined in `configs/train.toml`. You can change the training parameters by editing this file. The model configuration is defined in `configs/model_configs/`. 
 
 ```bash
-python anim/train.py --config configs/train.toml
+python -m anim.train --config configs/train.toml
 ```
+When training starts, the current configuration is "frozen" into a `run_config.json` file inside the save directory. Evaluation and rendering scripts use this file as their source of truth, ensuring that:
+1. Input data protocols (YOLO joints vs. ground-truth) are consistent.
+2. Model hyperparameters (RNN hidden size, number of transformer heads) match the weights.
+3. System parameters (device, dtype) are defaulted correctly.
+
 
 ### Evaluation
-
+To evaluate a trained model, you can use the following command:
 ```bash
-python anim/test.py temp/your_experiment_folder
+python -m anim.test <PATH_TO_EXPERIMENT_FOLDER>
 ```
+Metrics are saved in `<PATH_TO_EXPERIMENT_FOLDER>/metrics.json`.
 
 ### Rendering
-
+To render animation from a trained model, you can use the following command:
 ```bash
-python anim/render.py temp/your_experiment_folder test --rec_idx 0 10
+python -m anim.render <PATH_TO_EXPERIMENT_FOLDER> test --rec_idx <RECORDING_INDICES>
 ```
+This renders recordings of indices <RECORDING_INDICES>. If <RECORDING_INDICES> is empty, it renders all recordings. If <RECORDING_INDICES> contains -1, it renders a random recording.
 
+Example:
+```bash
+python -m anim.render saves/mcavaposer test --rec_idx 0 2 4 5 
+```
 
 ## 🚀 Key Features
 
@@ -73,42 +87,9 @@ python anim/render.py temp/your_experiment_folder test --rec_idx 0 10
   - `prepare_data.toml`: Data ingestion settings (YOLO model, dataset paths).
 - **`filter_model/`**: A library of temporal filters for post-processing and online inference.
 
-## 🛠 Getting Started
-
-### 1. Data Preparation
-Configure your paths in `configs/prepare_data.toml` and ensure your AMASS dataset is accessible.
-
-### 2. Training
-Run the training script to begin optimization:
-```bash
-python anim/train.py
-```
-Settings are pulled from `configs/train.toml`. Logs and model checkpoints are saved to the `./temp` directory by default.
-
-### 3. Evaluation
-To evaluate a trained experiment:
-```bash
-python anim/test.py temp/your_experiment_folder
-```
-By default, it loads the latest checkpoint and calculates MPJPE, MPJRE, and Jitter metrics on the test split.
-
-### 4. Rendering
-Visualize results by rendering AVI videos:
-```bash
-python anim/render.py temp/your_experiment_folder test --rec_idx 0 10
-```
-This renders recordings 0 and 10 from the test split using the ground-truth comparison.
-
-## 📊 Configuration System
-
-When training starts, the current configuration is "frozen" into a `run_config.json` file inside the save directory. Evaluation and rendering scripts use this file as their source of truth, ensuring that:
-1. Input data protocols (YOLO joints vs. ground-truth) are consistent.
-2. Model hyperparameters (RNN hidden size, number of transformer heads) match the weights.
-3. System parameters (device, dtype) are defaulted correctly.
-
 ## 🌊 Temporal Filtering
 
-Enable Kalman filtering by setting `with_kalman_filter = true` in your config. This applies a `ConstantAcc` (or similar) filter to predicted joint positions, significantly reducing high-frequency jitter in the output sequences.
+Enable Kalman filtering by setting `with_kalman_filter = true` in your config. This applies a `ConstantAcc` or `Gaussian` filter to predicted joint positions, significantly reducing high-frequency jitter in the output sequences.
 
 ## Citing
 
