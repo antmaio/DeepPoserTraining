@@ -1,8 +1,9 @@
-# OpenMPLPoser
+# MCaVAPoser
 
 ## 🚀 Overview
 
-OpenMPLPoser provides a pipeline for training and evaluating models that predict full-body human motion from sparse HMD inputs (head and hand positions) and optional external camera views. It features a clean configuration system, integrated Kalman filtering for temporal smoothness, and automated rendering utilities for visualization.
+MCaVAPoser provides a pipeline for training and evaluating models that predict full-body human motion from sparse HMD inputs (head and hand positions) and optional external camera views. It features a clean configuration system, integrated Kalman filtering for temporal smoothness, and automated rendering utilities for visualization.
+
 
 ## 📦 Installation
 
@@ -16,8 +17,37 @@ pip install -r requirements.txt
 ### Using Conda
 ```bash
 conda env create -f environment.yml
-conda activate openmplposer
+conda activate mcavaposer
 ```
+
+This environment has been tested with Python 3.9
+
+## 🛠 Usage
+
+### Data Preparation
+
+```bash
+python anim/prepare_data.py --config configs/prepare_data.toml
+```
+
+### Training
+
+```bash
+python anim/train.py --config configs/train.toml
+```
+
+### Evaluation
+
+```bash
+python anim/test.py temp/your_experiment_folder
+```
+
+### Rendering
+
+```bash
+python anim/render.py temp/your_experiment_folder test --rec_idx 0 10
+```
+
 
 ## 🚀 Key Features
 

@@ -1,4 +1,4 @@
-name: openmplposer_final
+name: mcavaposer
 channels:
   - defaults
 dependencies:
@@ -112,5 +112,5 @@ dependencies:
     - urllib3==2.6.3
     - werkzeug==3.1.5
     - zipp==3.23.0
-prefix: /home/antoine/miniconda3/envs/openmplposer_final
+prefix: /home/antoine/miniconda3/envs/mcavaposer
 
