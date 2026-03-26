@@ -69,23 +69,7 @@ python -m anim.render saves/mcavaposer test --rec_idx 0 2 4 5
 - **Temporal-Spatial Architecture**: Uses a modular design with RNN/Transformer blocks for robust sequence modeling.
 - **Kalman Filtering Suite**: Integrated support for multiple Kalman filter variants (Constant Acceleration, Student's t, etc.) for online smoothing and occlusion handling.
 - **Unified Configuration**: Streamlined TOML-based configuration for data preparation, training, and evaluation.
-- **Automated Visualization**: Batch rendering of side-by-side comparison videos (AVI/MP4) with configurable time-scaling.
-
-## 📂 Repository Structure
-
-- **`anim/`**: Core logic and scripts.
-  - `train.py`: Main entry point for model training. Handles data loading, optimizer setup, and checkpointing.
-  - `test.py`: Fast evaluation script. Automatically loads the latest checkpoint and generates detailed MPJPE/MPJRE metrics.
-  - `render.py`: High-quality video generation utility for qualitative analysis.
-  - **`models/`**: 
-    - `architecture.py`: Definition of RNN/Transformer building blocks.
-    - `hmd_poser_ext_hmr_head_centered.py`: The flagship model implementation.
-    - `losses.py`: Comprehensive loss suite (FK-space loss, 6D rotation orthonormality, smoothness priors).
-  - **`data/`**: AMASS dataset integration and loading logic.
-- **`configs/`**: Standard TOML templates.
-  - `train.toml`: Global training hyperparameters.
-  - `prepare_data.toml`: Data ingestion settings (YOLO model, dataset paths).
-- **`filter_model/`**: A library of temporal filters for post-processing and online inference.
+- **Visualization**: Side-by-side rendering of comparison videos (AVI/MP4) with configurable time-scaling.
 
 ## 🌊 Temporal Filtering
 
