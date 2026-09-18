@@ -1,4 +1,12 @@
 """
+Prepare motion-capture data for training/evaluation.
+
+Loads a TOML configuration file describing a dataset root, evaluation
+protocol, body-model topology, and (optionally) a YOLO pose-estimation
+model, then iterates over the relevant dataset subsets/phases and runs
+the preprocessing pipeline (`data.utils_data.process`) for each one,
+writing the resulting keypoints to disk.
+
 From https://github.com/zxz267/AvatarJLM
 """
 # External
@@ -32,33 +40,23 @@ _CAMERA_PATHS = {
     3: CAMERA_PATH_PROTOCOL_3,
 }
 
-# Dataset subsets per protocol
-_PROTOCOL_DATASETS = {
-    1: {'train_test': ['BioMotionLab_NTroje', 'CMU', 'MPI_HDM05']},
-    2: {'train_test': ['BioMotionLab_NTroje', 'CMU', 'MPI_HDM05']},
-    3: {
-        'train': [
-            'MPI_HDM05', 'BioMotionLab_NTroje', 'CMU', 'ACCAD', 'BMLmovi',
-            'EKUT', 'Eyes_Japan_Dataset', 'KIT', 'MPI_Limits', 'MPI_mosh',
-            'SFU', 'TotalCapture',
-        ],
-        'test': ['HumanEva', 'Transitions_mocap'],
-    },
-}
-
-# SMPLX topology uses different dataset folder names
-_SMPLX_NAME_MAP = {
-    'BioMotionLab_NTroje': 'BMLrub',
-    'MPI_HDM05':           'HDM05',
-}
-
-
 # ---------------------------------------------------------------------------
 # Config helpers
 # ---------------------------------------------------------------------------
 
 class Config:
-    """Simple attribute container populated from TOML + CLI overrides."""
+    """Simple attribute container populated from TOML.
+
+    Attributes:
+        root: Path to the root of the motion-capture dataset.
+        protocol: Evaluation protocol identifier (1, 2, or 3).
+        support_data: Path to support data (e.g. body-model files).
+        data_split: Path to the directory containing train/test split files.
+        topology: Body-model topology to use, either 'smpl' or 'smplx'.
+        output_dir: Directory where processed keypoints will be written.
+        yolo_model: Optional YOLO model name used for 2-D pose estimation.
+            If not set, no YOLO-based pose estimation is performed.
+    """
     root: str
     protocol: int
     support_data: str
@@ -69,49 +67,66 @@ class Config:
 
 
 def _load_config(args: argparse.Namespace) -> Config:
+    """Load and validate the configuration from a TOML file.
+
+    Reads the TOML file at `args.config` and populates a `Config` object
+    from its `data_path`, `yolo`, `body_model`, and `protocol` sections,
+    applying sensible defaults where applicable.
+
+    Args:
+        args: Parsed command-line arguments; only `args.config` (the path
+            to the TOML configuration file) is used.
+
+    Returns:
+        A populated `Config` instance.
+
+    Raises:
+        ValueError: If `root` or `protocol` is not specified in the
+            config file.
+    """
     with open(args.config, 'rb') as f:
         toml = tomli.load(f)
 
     cfg = Config()
-    
+
     dp_cfg   = toml.get('data_path',  {})
     yolo_cfg = toml.get('yolo',       {})
     bm_cfg   = toml.get('body_model', {})
     pr_cfg   = toml.get('protocol',   {})
 
-    cfg.root         = args.root         or dp_cfg.get('root')
-    cfg.protocol     = args.protocol     or pr_cfg.get('protocol')
-    cfg.support_data = args.support_data or dp_cfg.get('support_data', './data/support_data')
-    cfg.data_split   = args.data_split   or dp_cfg.get('data_split',   './data/data_split')
-    cfg.topology     = args.topology     or bm_cfg.get('topology',     'smpl')
-    cfg.output_dir   = args.output_dir   or dp_cfg.get('output_dir',   './data/keypoints/')
-    cfg.yolo_model   = args.yolo_model   or yolo_cfg.get('model')
+    cfg.root         = dp_cfg.get('root')
+    cfg.protocol     = pr_cfg.get('protocol')
+    cfg.support_data = dp_cfg.get('support_data', './data/support_data')
+    cfg.data_split   = dp_cfg.get('data_split',   './data/data_split')
+    cfg.topology     = bm_cfg.get('topology',     'smpl')
+    cfg.output_dir   = dp_cfg.get('output_dir',   './data/keypoints/')
+    cfg.yolo_model   = yolo_cfg.get('model')
 
     if cfg.root is None:
-        raise ValueError("'root' must be specified in config or via --root.")
+        raise ValueError("'root' must be specified in the config file.")
     if cfg.protocol is None:
-        raise ValueError("'protocol' must be specified in config or via --protocol.")
+        raise ValueError("'protocol' must be specified in the config file.")
 
     return cfg
 
 
-def log_config(cfg: Config, args: argparse.Namespace):
-    """Log the configuration state in cyan, highlighting CLI overrides."""
+def log_config(cfg: Config):
+    """Log a summary of the resolved configuration.
+
+    Prints each configuration field to the logger, formatted in cyan for
+    readability in the console.
+
+    Args:
+        cfg: The configuration to log.
+    """
     CYAN = "\033[36m"
-    BOLD = "\033[1m"
     RESET = "\033[0m"
 
     logging.info(f"{CYAN}--- Configuration Summary ---{RESET}")
     for key in ['root', 'protocol', 'support_data', 'data_split', 'topology', 'output_dir', 'yolo_model']:
         val = getattr(cfg, key)
-        # check if it was provided via CLI
-        is_overridden = getattr(args, key, None) is not None
-        
         label = f"{key:15}"
-        if is_overridden:
-            logging.info(f"{CYAN}{label}: {BOLD}{val}{RESET}{CYAN} [CLI OVERRIDE]{RESET}")
-        else:
-            logging.info(f"{CYAN}{label}: {val}{RESET}")
+        logging.info(f"{CYAN}{label}: {val}{RESET}")
     logging.info(f"{CYAN}-----------------------------{RESET}")
 
 # ---------------------------------------------------------------------------
@@ -119,6 +134,11 @@ def log_config(cfg: Config, args: argparse.Namespace):
 # ---------------------------------------------------------------------------
 
 def init_logging()->None:
+    """Configure the root logger.
+
+    Sets up basic logging with an INFO level and a timestamped format of
+    the form "YYYY-MM-DD HH:MM:SS - LEVEL - message".
+    """
     logging.basicConfig(
         format='%(asctime)s - %(levelname)s - %(message)s',
         level=logging.INFO
@@ -129,6 +149,19 @@ def init_logging()->None:
 # ---------------------------------------------------------------------------
 
 def get_camera_path(cfg: Config) -> str:
+    """Resolve the camera configuration path for the configured protocol.
+
+    Args:
+        cfg: The parsed configuration, whose `protocol` field selects
+            which camera path to return.
+
+    Returns:
+        The camera path string associated with `cfg.protocol`.
+
+    Raises:
+        NotImplementedError: If `cfg.protocol` is not one of the
+            supported protocols (1, 2, or 3).
+    """
     try:
         return _CAMERA_PATHS[cfg.protocol]
     except KeyError:
@@ -165,6 +198,22 @@ def make_dst_path(cfg: Config, subset: str, phase: str, use_yolo: bool) -> str:
 def _init_body_models(cfg: Config, device: str) -> tuple[dict, str, str]:
     """
     Instantiate the appropriate body models and return (models_dict, BMLrub_name, HDM_name).
+
+    Args:
+        cfg: Parsed configuration; `cfg.topology` selects between the
+            'smpl' and 'smplx' body-model families, and `cfg.support_data`
+            locates the on-disk model files for the 'smpl' family.
+        device: Torch device string (e.g. 'cuda' or 'cpu') to move the
+            instantiated models to.
+
+    Returns:
+        A 3-tuple of:
+            - A dict mapping gender (or 'neutral') to the loaded body model.
+            - The dataset folder name to use in place of 'BioMotionLab_NTroje'.
+            - The dataset folder name to use in place of 'MPI_HDM05'.
+
+    Raises:
+        NotImplementedError: If `cfg.topology` is neither 'smpl' nor 'smplx'.
     """
     num_betas = 16
 
@@ -200,6 +249,18 @@ def _iter_subsets(cfg: Config, BMLrub: str, HDM: str):
     """
     Yield (subset, phase) pairs for the configured protocol.
     Applies the SMPLX name map when cfg.topology == 'smplx'.
+
+    Args:
+        cfg: Parsed configuration; `cfg.protocol` (1, 2, or 3) selects
+            which dataset subsets and phases are yielded.
+        BMLrub: Dataset folder name to use for the "BioMotionLab_NTroje"
+            subset (topology-dependent naming).
+        HDM: Dataset folder name to use for the "MPI_HDM05" subset
+            (topology-dependent naming).
+
+    Yields:
+        Tuples of `(subset, phase)`, where `phase` is either 'train'
+        or 'test'.
     """
     proto = cfg.protocol
 
@@ -223,6 +284,15 @@ def _iter_subsets(cfg: Config, BMLrub: str, HDM: str):
 # YOLO init
 # ---------------------------------------------------------------------------
 def init_yolo(yolo_model: str):
+    """Load a YOLO model and move it to GPU device 0.
+
+    Args:
+        yolo_model: Path or identifier of the YOLO model weights to load
+            (e.g. 'yolov8n-pose.pt').
+
+    Returns:
+        The loaded `YOLO` model instance, moved to CUDA device 0.
+    """
     model = YOLO(yolo_model)
     model.to(0)
     return model
@@ -232,22 +302,24 @@ def init_yolo(yolo_model: str):
 # ---------------------------------------------------------------------------
 
 def main():
+    """Run the motion-capture data preparation pipeline.
+
+    Parses the `config` command-line argument, loads and logs the
+    resulting configuration, initializes the body models, mesh viewer,
+    and (optionally) a YOLO pose-estimation model, then iterates over
+    every dataset subset/phase for the configured protocol and runs
+    `data.utils_data.process` to generate and save preprocessed
+    keypoints for each one.
+    """
 
     parser = argparse.ArgumentParser(description='Prepare motion-capture data.')
     parser.add_argument('config', type=str, help='Path to TOML configuration file.')
-    parser.add_argument('--root',         type=str, help='Path to data root (overrides config).')
-    parser.add_argument('--protocol',     type=int, choices=[1, 2, 3], help='Evaluation protocol (overrides config).')
-    parser.add_argument('--support_data', type=str, help='Path to support data (overrides config).')
-    parser.add_argument('--data_split',   type=str, help='Path to data split (overrides config).')
-    parser.add_argument('--topology',     type=str, choices=['smpl', 'smplx'], help='Body topology (overrides config).')
-    parser.add_argument('--output_dir',   type=str, help='Path where the processed keypoints will be saved (overrides config).')
-    parser.add_argument('--yolo_model',   type=str, help='YOLO model name, e.g. yolov8n-pose (overrides config).')
     args = parser.parse_args()
 
     init_logging()
 
     cfg = _load_config(args)
-    log_config(cfg, args)
+    log_config(cfg)
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     camera_path = get_camera_path(cfg)
