@@ -14,13 +14,18 @@ To set up the environment, you can use the provided `requirements.txt` or `envir
 pip install -r requirements.txt
 ```
 
-### Using Conda
+### Using conda
 ```bash
 conda env create -f environment.yml
 conda activate mcavaposer
 ```
 
 This environment has been tested with Python 3.9
+
+### Other dependencies
+1. Download ```./human_body_prior/human_body_prior``` from ```https://github.com/nghorbani/human_body_prior.git```
+2. Download ```./body_visualizer/body_visualizer``` from ```https://github.com/nghorbani/body_visualizer.git```
+3. Install ```psbody-mesh``` from ```https://github.com/MPI-IS/mesh.git```. Current release has been tested with ```psbody``` from [here](https://drive.google.com/drive/folders/1Lp4E-Kc8sauclMfG6jpMEXisND_k236c?usp=sharing). 
 
 ## 🛠 Usage
 
