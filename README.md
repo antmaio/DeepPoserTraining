@@ -42,11 +42,12 @@ This environment has been tested with Python 3.9
 ### Data Preparation
 Configure your paths in `configs/prepare_data.toml` and ensure your AMASS dataset is accessible.
 
-Then, run:
+Then, to prepare HMD and hands data, apply pose estimation on videos rendering and perform multiview 2D/3D pose lifting, run:
 ```bash
 python -m data.prepare_data --config configs/prepare_data.toml
 python -m pose_lifter.triang --config configs/prepare_data.toml
 ```
+
 
 ### Training
 Training configuration is defined in `configs/train.toml`. You can change the training parameters by editing this file. The model configuration is defined in `configs/model_configs/`. 
