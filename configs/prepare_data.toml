@@ -17,3 +17,6 @@ protocol_3 = "./data/virtual_cameras/protocol_3"
 
 [protocol]
 protocol = 1                                        # protocol to use for data split (1 or 3)
+
+[pose_lifter]
+relative_output_dir = "triang"                      # subdirectory for 3D positions reconstructed from multiview 2D poses

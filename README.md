@@ -40,11 +40,12 @@ This environment has been tested with Python 3.9
 ## 🛠 Usage
 
 ### Data Preparation
-Configure your paths in `configs/prepare_data.toml` and ensure your AMASS dataset is accessible. You can define the virtual cameras parameters for video rendering in `data/virtual_cameras/`.
+Configure your paths in `configs/prepare_data.toml` and ensure your AMASS dataset is accessible.
 
 Then, run:
 ```bash
-python -m anim.prepare_data --config configs/prepare_data.toml
+python -m data.prepare_data --config configs/prepare_data.toml
+python -m pose_lifter.triang --config configs/prepare_data.toml
 ```
 
 ### Training
