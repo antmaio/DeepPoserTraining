@@ -1,7 +1,6 @@
 import typing
 import torch
 import json
-from filter_model.occlusion_handling_online_batched_kalman_controller import OcclusionHandlingOnlineBatchedKalmanController
 
 class FlexiblePerJointKalmanFilter:
     def __init__(self, dt, njoints, joint_params=None, active_joints: typing.List[int] = None):

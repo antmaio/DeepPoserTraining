@@ -7,7 +7,7 @@ model, then iterates over the relevant dataset subsets/phases and runs
 the preprocessing pipeline (`data.utils_data.process`) for each one,
 writing the resulting keypoints to disk.
 
-From https://github.com/zxz267/AvatarJLM
+Inspired by https://github.com/zxz267/AvatarJLM
 """
 # External
 import os
@@ -18,27 +18,21 @@ import torch
 from typing import Optional
 from ultralytics import YOLO
 
+import numpy as np
+if not hasattr(np, "infty") and np.lib.NumpyVersion(np.__version__) >= "2.0.0": #`np.infty` was removed in the NumPy 2.0 release. Use `np.inf` instead..
+    np.infty = np.inf
+
 # Internal
 from anim.data.amass import get_frozen_smplx_layer
 from data.utils_data import process
 from human_body_prior.body_model.body_model import BodyModel
 from data.data_config import YoloJoints
 from data.rendering import init_mesh_viewer
-from data.camera_config import (
-    CAMERA_PATH_PROTOCOL_1,
-    CAMERA_PATH_PROTOCOL_2,
-    CAMERA_PATH_PROTOCOL_3,
-)
+from data.camera_config import load_camera_paths
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-_CAMERA_PATHS = {
-    1: CAMERA_PATH_PROTOCOL_1,
-    2: CAMERA_PATH_PROTOCOL_2,
-    3: CAMERA_PATH_PROTOCOL_3,
-}
 
 # ---------------------------------------------------------------------------
 # Config helpers
@@ -64,6 +58,7 @@ class Config:
     topology: str
     output_dir: str
     yolo_model: Optional[str]
+    camera_paths: dict[int, str]
 
 
 def _load_config(args: argparse.Namespace) -> Config:
@@ -101,6 +96,7 @@ def _load_config(args: argparse.Namespace) -> Config:
     cfg.topology     = bm_cfg.get('topology',     'smpl')
     cfg.output_dir   = dp_cfg.get('output_dir',   './data/keypoints/')
     cfg.yolo_model   = yolo_cfg.get('model')
+    cfg.camera_paths = load_camera_paths(toml_data=toml)
 
     if cfg.root is None:
         raise ValueError("'root' must be specified in the config file.")
@@ -127,6 +123,8 @@ def log_config(cfg: Config):
         val = getattr(cfg, key)
         label = f"{key:15}"
         logging.info(f"{CYAN}{label}: {val}{RESET}")
+    for protocol, path in sorted(cfg.camera_paths.items()):
+        logging.info(f"{CYAN}{f'camera_{protocol}':15}: {path}{RESET}")
     logging.info(f"{CYAN}-----------------------------{RESET}")
 
 # ---------------------------------------------------------------------------
@@ -163,7 +161,7 @@ def get_camera_path(cfg: Config) -> str:
             supported protocols (1, 2, or 3).
     """
     try:
-        return _CAMERA_PATHS[cfg.protocol]
+        return cfg.camera_paths[cfg.protocol]
     except KeyError:
         raise NotImplementedError(f"Protocol {cfg.protocol} does not exist.")
 

@@ -1,14 +1,19 @@
 [data_path]
-root = "../AMASS"                       # path to the AMASS dataset
-support_data = "./data/support_data"    # path to the body models
-data_split = "./data/data_split"        # path to the data split
-output_dir = "./data/keypoints/"        # path to the output directory
+root = "../../AMASS"                                # path to the AMASS dataset
+support_data = "./data/support_data"                # path to the body models
+data_split = "./data/data_split"                    # path to the data split
+output_dir = "./data/keypoints/"                    # path to the output directory
 
 [yolo]
-model = "yolov8m-pose"                  # model to use for 2D pose estimation, set to None if you don't want to use YOLO
+model = "yolov8n-pose"                              # model to use for 2D pose estimation, set to None if you don't want to estimate pose from AMASS videos
 
 [body_model]
-topology = "smpl"                       # topology of the body model (smpl or smplx)
+topology = "smpl"                                   # topology of the body model (smpl or smplx)
+
+[camera]                                            # virtual cameras parameters folder path
+protocol_1 = "./data/virtual_cameras/protocol_1"    
+protocol_2 = "./data/virtual_cameras/protocol_2"
+protocol_3 = "./data/virtual_cameras/protocol_3"
 
 [protocol]
-protocol = 1                            # protocol to use for data split (1 or 3)
+protocol = 1                                        # protocol to use for data split (1 or 3)

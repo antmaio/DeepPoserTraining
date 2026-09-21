@@ -18,7 +18,6 @@ from torch.utils.data import Dataset
 # Internal
 import data.data_config as bm_config
 import filter_model
-from data.data_config import YoloJoints, SmplxJoints, FPS, SMPLX_UPPER_JOINTS, SMPLX_LOWER_JOINTS
 from utils import utils_fix
 
 # ---------------------------------------------------------------------------
@@ -29,8 +28,6 @@ from utils import utils_fix
 
 _CONF_THRESHOLD = 0.5
 _KP_CLAMP       = 5.0
-
-_SUBSETS = ('CMU', 'MPI_HDM05', 'BioMotionLab_NTroje')
 
 _DATASET_DIR_MAP = {
     'cmu':     'CMU',

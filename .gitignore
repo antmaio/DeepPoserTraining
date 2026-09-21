@@ -4,8 +4,9 @@ __pycache__/
 
 # --- Data & Body models ---
 /data/keypoints/
-support_data/
+/data/support_data/
 /data/J_regressor_coco.npy
+/data/AMASS
 
 # --- Dependencies & Libs ---
 human_body_prior/

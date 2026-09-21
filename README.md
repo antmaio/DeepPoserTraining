@@ -9,12 +9,20 @@ MCaVAPoser provides a pipeline for training and evaluating models that predict f
 
 To set up the environment, you can use the provided `requirements.txt` or `environment.yml` files:
 
-### Using pip
+### Datasets
+
+1. Please download the datasets `BMLrub`, `CMU`,`HDM05`, `ACCAD`, `BMLmovi`, `EKUT`, `Eyes_Japan_Dataset`, `KIT`, `MPI_Limits`, `MPI_mosh`, `SFU`, `TotalCapture` from [AMASS](https://amass.is.tue.mpg.de/index.html).
+2. Download the required body model and placed them in `support_data/body_models` directory of this repository. For SMPL+H body model, download it from http://mano.is.tue.mpg.de/. Please download the AMASS version of the model with DMPL blendshapes. You can obtain dynamic shape blendshapes, e.g. DMPLs, from http://smpl.is.tue.mpg.de
+3. Download joints regressor from SMPLX to COCO from [here](https://github.com/kasvii/PMCE/tree/main/data/COCO)
+
+### Dependencies
+
+#### Using pip
 ```bash
 pip install -r requirements.txt
 ```
 
-### Using conda
+#### Using conda
 ```bash
 conda env create -f environment.yml
 conda activate mcavaposer
@@ -22,10 +30,12 @@ conda activate mcavaposer
 
 This environment has been tested with Python 3.9
 
-### Other dependencies
+#### Other dependencies
 1. Download ```./human_body_prior/human_body_prior``` from ```https://github.com/nghorbani/human_body_prior.git```
 2. Download ```./body_visualizer/body_visualizer``` from ```https://github.com/nghorbani/body_visualizer.git```
 3. Install ```psbody-mesh``` from ```https://github.com/MPI-IS/mesh.git```. Current release has been tested with ```psbody``` from [here](https://drive.google.com/drive/folders/1Lp4E-Kc8sauclMfG6jpMEXisND_k236c?usp=sharing). 
+
+
 
 ## 🛠 Usage
 
