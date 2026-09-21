@@ -1,8 +1,8 @@
-# MCaVAPoser
+# Deep Learning Model for Avatar Full-Body Tracking from Sparse Inputs  
 
 ## 🚀 Overview
 
-MCaVAPoser provides a pipeline for training and evaluating models that predict full-body human motion from sparse HMD inputs (head and hand positions) and optional external camera views. It features a clean configuration system, integrated Kalman filtering for temporal smoothness, and automated rendering utilities for visualization.
+This repo provides a pipeline for training and evaluating models that predict full-body human motion from sparse HMD inputs (head and hand positions) and optional external camera views. It features a clean configuration system, integrated Kalman filtering for temporal smoothness and automated rendering utilities for visualization.
 
 
 ## 📦 Installation
