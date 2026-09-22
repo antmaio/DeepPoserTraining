@@ -11,7 +11,7 @@ from torch.utils.data import Dataset
 
 # Internal
 import utils.utils_transform as transform
-from anim.data.amass import SmplxJoints
+from data.data_config import SmplxJoints
 
 
 # ---------------------------------------------------------------------------

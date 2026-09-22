@@ -2,6 +2,7 @@
 Training entry point.
 """
 # External
+import argparse
 import json
 import logging
 import os
@@ -29,11 +30,40 @@ from human_body_prior.body_model.body_model import BodyModel
 # ---------------------------------------------------------------------------
 
 _RUN_CONFIG_NAME = 'run_config.json'
+_DEFAULT_CONFIG_PATH = 'configs/train.toml'
+_DEFAULT_DATAROOT = './data/keypoints/'
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     level=logging.INFO,
 )
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments for the training entry point.
+
+    The config file is given as a plain positional argument named
+    ``config`` (e.g. ``python train.py configs/train.toml``), not as a
+    ``--config`` option, and defaults to ``_DEFAULT_CONFIG_PATH`` when
+    omitted.
+
+    Returns:
+        Parsed ``argparse.Namespace`` with a single ``config`` attribute
+        holding the path to the TOML config file to load.
+    """
+    parser = argparse.ArgumentParser(description='Train a motion model.')
+    parser.add_argument(
+        'config',
+        type=str,
+        nargs='?',
+        default=_DEFAULT_CONFIG_PATH,
+        help=f"Path to the training TOML config file (default: '{_DEFAULT_CONFIG_PATH}').",
+    )
+    return parser.parse_args()
 
 
 # ---------------------------------------------------------------------------
@@ -44,12 +74,27 @@ class Config:
     """Attribute-based view over a plain dict — mirrors TOML / JSON configs."""
 
     def __init__(self, dictionary: dict):
+        """Copy every key/value pair from ``dictionary`` onto this instance.
+
+        Args:
+            dictionary: Flat mapping of config keys to values. Each key
+                becomes an attribute of the same name on this object.
+        """
         for k, v in dictionary.items():
             setattr(self, k, v)
 
 
 def get_model_run_config(model_dir: str) -> Optional[dict]:
-    """Load the run_config.json saved alongside a model, or return None."""
+    """Load the run_config.json saved alongside a model, or return None.
+
+    Args:
+        model_dir: Directory containing a previously saved model, expected
+            to hold a ``run_config.json`` file (see ``_RUN_CONFIG_NAME``).
+
+    Returns:
+        The parsed JSON config as a dict, or ``None`` if the file doesn't
+        exist under ``model_dir``.
+    """
     path = os.path.join(model_dir, _RUN_CONFIG_NAME)
     if not os.path.exists(path):
         logging.info(f'{path} not found – ignored.')
@@ -59,7 +104,21 @@ def get_model_run_config(model_dir: str) -> Optional[dict]:
 
 
 def log_config(cfg_dict: dict, is_train: bool = True, model_cfg_dict: dict = None):
-    """Log the configuration state in a graceful, cyan-colored summary."""
+    """Log the configuration state in a graceful, cyan-colored summary.
+
+    Groups known keys under readable headers (Data / Training / Model /
+    System / Kalman), logs any remaining keys under "Other", and optionally
+    logs a separate model-specific configuration dict.
+
+    Args:
+        cfg_dict: The full run configuration to log.
+        is_train: If False, omits the "Training" group entirely (useful
+            when logging config for inference/evaluation-only runs).
+        model_cfg_dict: Optional secondary config (e.g. parsed model
+            architecture config) to log under its own "Model Configuration"
+            section. Nested dict values are logged under their own
+            sub-headers.
+    """
     CYAN  = "\033[36m"
     BOLD  = "\033[1m"
     RESET = "\033[0m"
@@ -67,7 +126,7 @@ def log_config(cfg_dict: dict, is_train: bool = True, model_cfg_dict: dict = Non
     logging.info(f"{CYAN}--- Configuration Summary ---{RESET}")
     # Group keys for better readability
     groups = {
-        "Data":     ["dataset", "yolo_model", "mode", "data_dir", "cache_dir", "skinned_mesh_topology"],
+        "Data":     ["dataset", "yolo_model", "mode", "data_dir", "dataroot", "cache_dir", "skinned_mesh_topology"],
         "Training": ["batch_size", "win_len", "win_overlap", "zero_betas", "max_epoch", "epochs_per_save", "save_dir"],
         "Model":    ["model_config", "resume_dir"],
         "System":   ["device_str", "dtype_str", "dataloader_num_workers"],
@@ -84,7 +143,7 @@ def log_config(cfg_dict: dict, is_train: bool = True, model_cfg_dict: dict = Non
         relevant_keys = [k for k in keys if k in cfg_dict]
         if not relevant_keys:
             continue
-            
+
         logging.info(f"{CYAN}{BOLD}[{group_name}]{RESET}")
         for k in relevant_keys:
             val = cfg_dict[k]
@@ -114,17 +173,45 @@ def log_config(cfg_dict: dict, is_train: bool = True, model_cfg_dict: dict = Non
 
 
 def _build_data_dir(cfg_dict: dict) -> str:
-    """Construct the dataset root directory from protocol and topology settings."""
+    """Construct the dataset root directory from protocol and topology settings.
+
+    The directory is built as ``{dataroot}/{yolo_model}_protocol_{N}`` where
+    ``N`` is 1 (for protocols 1 and 2) or 3, with a ``_smplx`` suffix added
+    when the configured skinned-mesh topology is SMPLX.
+
+    Args:
+        cfg_dict: Run configuration dict. Reads ``yolo_model`` (default
+            ``'yolov8n-pose'``), ``protocol`` (default ``1``), ``dataroot``
+            (default ``_DEFAULT_DATAROOT``), and ``skinned_mesh_topology``.
+
+    Returns:
+        The constructed data directory path (not verified to exist here;
+        callers are expected to validate it, e.g. via
+        ``os.path.isdir(cfg.data_dir)``).
+    """
     yolo_model = cfg_dict.get('yolo_model', 'yolov8n-pose')
     protocol   = cfg_dict.get('protocol', 1)
     str_prot   = 1 if protocol in (1, 2) else 3
-    data_dir   = f"./data/keypoints/{yolo_model}_protocol_{str_prot}"
+    dataroot   = cfg_dict.get('dataroot', _DEFAULT_DATAROOT)
+    data_dir   = os.path.join(dataroot, f"{yolo_model}_protocol_{str_prot}")
     if cfg_dict.get('skinned_mesh_topology') == 'smplx':
         data_dir += '_smplx'
     return data_dir
 
 
 def _build_body_models(cfg: Config, device) -> list:
+    """Instantiate the body model(s) needed for the configured topology.
+
+    Args:
+        cfg: Run configuration. Reads ``skinned_mesh_topology`` (default
+            ``'smpl'``).
+        device: Torch device to move the body model(s) to.
+
+    Returns:
+        For SMPL topology: a two-element list ``[bm_male, bm_female]`` of
+        ``BodyModel`` instances. For any other topology (SMPLX): a
+        single-element list holding a frozen neutral SMPLX layer.
+    """
     topology = getattr(cfg, 'skinned_mesh_topology', 'smpl')
     if topology == 'smpl':
         bm_male   = BodyModel(bm_fname=bm_C._BM_FNAME_MALE_,   num_betas=bm_C._NUM_BETAS_,
@@ -136,7 +223,14 @@ def _build_body_models(cfg: Config, device) -> list:
 
 
 def _ensure_scheduler(model, n_batches: int):
-    """Guarantee the model has a valid scheduler, creating one if necessary."""
+    """Guarantee the model has a valid scheduler, creating one if necessary.
+
+    Args:
+        model: The (unwrapped) model instance, expected to expose
+            ``nbatch``/``set_nbatch`` and ``lr_scheduler``/``set_scheduler``.
+        n_batches: Number of batches per epoch, needed to size the
+            scheduler if one must be created.
+    """
     if not getattr(model, 'nbatch', None):
         model.set_nbatch(n_batches)
     if not getattr(model, 'lr_scheduler', None):
@@ -148,6 +242,18 @@ def _ensure_scheduler(model, n_batches: int):
 # ---------------------------------------------------------------------------
 
 def _accumulate_losses(accumulator: Optional[dict], batch_losses: dict) -> dict:
+    """Append one batch's per-key losses onto a running per-epoch accumulator.
+
+    Args:
+        accumulator: Existing dict mapping loss name to a list of per-batch
+            numpy values, or ``None`` to start a fresh accumulator.
+        batch_losses: Dict mapping loss name to a scalar torch tensor for
+            the current batch.
+
+    Returns:
+        The (possibly newly created) accumulator dict, with this batch's
+        losses appended under each key.
+    """
     if accumulator is None:
         return {k: [v.detach().cpu().numpy()] for k, v in batch_losses.items()}
     for k, v in batch_losses.items():
@@ -156,10 +262,29 @@ def _accumulate_losses(accumulator: Optional[dict], batch_losses: dict) -> dict:
 
 
 def _mean_losses(accumulator: dict) -> dict:
+    """Reduce a per-epoch loss accumulator to per-key means.
+
+    Args:
+        accumulator: Dict mapping loss name to a list of per-batch values.
+
+    Returns:
+        Dict mapping loss name to the float mean over all accumulated batches.
+    """
     return {k: float(np.mean(vs)) for k, vs in accumulator.items()}
 
 
 def _log_losses(epoch: int, train_losses: dict, val_losses: dict, writer: SummaryWriter):
+    """Log and write to TensorBoard the train/val loss values for one epoch.
+
+    Args:
+        epoch: Current epoch index.
+        train_losses: Dict mapping loss name to its mean training value.
+        val_losses: Dict mapping loss name to its mean validation value.
+            Expected to share the same keys as ``train_losses``.
+        writer: TensorBoard ``SummaryWriter`` to log scalar pairs to. Any
+            ``OSError`` raised while writing (e.g. a transient filesystem
+            issue) is silently ignored so training can continue.
+    """
     for key in train_losses:
         t, v = train_losses[key], val_losses[key]
         logging.info(f"Epoch={epoch} | {key}: train={t:.6f} | val={v:.6f}")
@@ -170,6 +295,15 @@ def _log_losses(epoch: int, train_losses: dict, val_losses: dict, writer: Summar
 
 
 def _log_gradients(model, epoch: int, writer: SummaryWriter):
+    """Log per-parameter weight and gradient histograms to TensorBoard.
+
+    Args:
+        model: The (possibly wrapped) model whose ``named_parameters()``
+            will be iterated. Only parameters with ``requires_grad=True``
+            are logged.
+        epoch: Current epoch index, used as the TensorBoard step.
+        writer: TensorBoard ``SummaryWriter`` to log histograms/scalars to.
+    """
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
@@ -184,7 +318,22 @@ def _log_gradients(model, epoch: int, writer: SummaryWriter):
 # ---------------------------------------------------------------------------
 
 def main():
-    config_path = "configs/train.toml"
+    """Run the full training entry point: config loading, setup, and the training loop.
+
+    Behavior overview:
+      1. Parse the ``config`` CLI argument and load the TOML config.
+      2. If ``resume_dir`` is set, merge the saved run config with the new
+         TOML (new values take priority) and resume from the last checkpoint;
+         otherwise create a new model/run directory and start from scratch.
+      3. Build datasets/dataloaders, body models, optimizer scheduler, and
+         (optionally) multi-GPU wrapping.
+      4. Run the train/validate loop up to ``max_epoch``, periodically
+         checkpointing and logging losses/gradients to TensorBoard.
+      5. On ``KeyboardInterrupt`` or ``models.StopTrainingException``, stop
+         gracefully; a final checkpoint is always saved before returning.
+    """
+    args = parse_args()
+    config_path = args.config
     with open(config_path, 'rb') as fp:
         cfg_dict = tomli.load(fp)
 

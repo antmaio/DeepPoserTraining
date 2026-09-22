@@ -6,8 +6,7 @@ import enum
 import logging
 import os
 import pathlib
-import typing
-from typing import Iterable, List, Tuple, Union, Optional
+from typing import Iterable, List, Union, Optional
 
 import numpy as np
 import smplx
@@ -17,6 +16,7 @@ from torch.utils.data import Dataset
 
 # Internal
 import data.data_config as bm_config
+from data.data_config import YoloJoints
 import filter_model
 from utils import utils_fix
 

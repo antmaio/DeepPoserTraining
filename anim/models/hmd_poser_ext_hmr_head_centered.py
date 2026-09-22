@@ -18,13 +18,12 @@ from .architecture import (
     build_shape_head,
 )
 from .losses import LossWeights, compute_losses
-from anim.data.amass import SmplxJoints, YoloJoints, FPS
+from data.data_config import SmplxJoints, YoloJoints
 from utils.utils_transform import (
     two_axis_to_matrix,
     matrix_to_two_axis,
     matrix_to_angle_axis,
 )
-from utils.utils_ukf import UKF, filter_poses, TransitionStateFunctions
 from human_body_prior.body_model.body_model import BodyModel
 import data.data_config as bm_C
 

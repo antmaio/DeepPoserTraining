@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 
 # Internal
-from anim.data.amass import SmplxJoints
+from data.data_config import SmplxJoints
 from utils.utils_transform import matrix_to_two_axis, rotational_fk
 
 

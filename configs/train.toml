@@ -1,28 +1,30 @@
 # -- Data --
-dataset                            = "amass-p1"        #dataset type regarding protocol (1,2,3)
-yolo_model                         = "yolov8n-pose"    #pose estimation model
-mode                               = "triang"          #METHOD to acquire 3D positions (from pose_lifter.METHOD)
-as_testset                         = "cmu"             #only used when protocol = 2
-skinned_mesh_topology              = "smpl"            #smpl or smplx
+dataroot                           = "./data/keypoints/"    #dataroot for .pkl (HMD and hands) and .npz (3D keypoints)
+dataset                            = "amass-p1"             #dataset type regarding protocol (1,2,3)
+yolo_model                         = "yolov8n-pose"         #pose estimation model
+mode                               = "triang"               #METHOD to acquire 3D positions (from pose_lifter.METHOD)
+as_testset                         = "cmu"                  #only used when protocol = 2
+skinned_mesh_topology              = "smpl"                 #smpl or smplx
 cache_dir                          = ".cache"
 
 # -- Training --
-batch_size                         = 128               #size of mini-batch
-win_len                            = 40                #windows of input motion features
-win_overlap                        = 5                 #windows overlap 
-zero_betas                         = false             #if true, take mean body shape from dataset
-max_epoch                          = 2                 #training epochs
-epochs_per_save                    = 1                 #save training and model state every epochs_per_save
-save_dir                           = "./temp"          #saving directory
+batch_size                         = 128                    #size of mini-batch
+win_len                            = 40                     #windows of input motion features
+win_overlap                        = 5                      #windows overlap 
+zero_betas                         = false                  #if true, take mean body shape from dataset
+max_epoch                          = 2                      #training epochs
+epochs_per_save                    = 1                      #save training and model state every epochs_per_save
+save_dir                           = "./temp"               #saving directory
 
 # -- Kalman --
-with_kalman_filter                 = true              #if true, apply kalman filter to 3D positions prior to full-body pose estimation
-filter_name                        = "ConstantAcc"     #kalman filter implementation name
+with_kalman_filter                 = false                   #if true, apply kalman filter to 3D positions prior to full-body pose estimation
+filter_name                        = "ConstantAcc"          #kalman filter implementation name
 
 # -- Model --
-model_config = "anim/model_configs/hmd-poser-ext-head-centered.toml" #model hyperparameters config file 
-
+model_config                       = "anim/model_configs/hmd-poser-ext-head-centered.toml" #model hyperparameters config file
+#resume_dir                        = "/path/to/save/folder"  #folder of pretrained weights for fine-tuning or resume training
+                         
 # -- System --
 device_str                         = "cuda"            
-dtype_str                          = "float32"         #data format
+dtype_str                          = "float32"              #data format
 dataloader_num_workers             = 0

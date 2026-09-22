@@ -7,7 +7,7 @@ import torch.nn as nn
 from torch.nn.utils import weight_norm  # pytorch 2.0.1
 
 # Internal
-from anim.data.amass import SmplxJoints
+from data.data_config import SmplxJoints
 
 
 # ---------------------------------------------------------------------------
