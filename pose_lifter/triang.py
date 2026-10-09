@@ -15,7 +15,6 @@ Typical usage:
 
 # External
 import argparse
-import copy
 import glob
 import logging
 import os

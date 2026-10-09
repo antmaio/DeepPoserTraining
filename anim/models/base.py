@@ -176,18 +176,18 @@ def batch_to_model_input_and_target(
     model_input = BaseModelInput(
         batch_size        = batch_size,
         win_len           = win_len,
-        head_pos_global   = position[:, :, SmplxJoints.HEAD],
-        head_rot_global   = _rot(SmplxJoints.HEAD),
-        lh_pos_global     = position[:, :, SmplxJoints.LEFT_WRIST],
-        lh_rot_global     = _rot(SmplxJoints.LEFT_WRIST),
-        rh_pos_global     = position[:, :, SmplxJoints.RIGHT_WRIST],
-        rh_rot_global     = _rot(SmplxJoints.RIGHT_WRIST),
-        hmr_joints        = hmr_position,
-        hmr_body_pose     = body_pose[:, :, 1:],
-        hmr_global_orient = body_pose[:, :, 0],
-        betas             = betas,
-        gender            = gender,
-        conf              = conf,
+        head_pos_global   = position[:, :, SmplxJoints.HEAD],           #head global positions
+        head_rot_global   = _rot(SmplxJoints.HEAD),                     #head global rotations
+        lh_pos_global     = position[:, :, SmplxJoints.LEFT_WRIST],     #left hand global positions
+        lh_rot_global     = _rot(SmplxJoints.LEFT_WRIST),               #left hand global rotations
+        rh_pos_global     = position[:, :, SmplxJoints.RIGHT_WRIST],    #right hand global positions
+        rh_rot_global     = _rot(SmplxJoints.RIGHT_WRIST),              #right hand global rotations
+        hmr_joints        = hmr_position,                               #body joints positions from external pose estimator
+        hmr_body_pose     = body_pose[:, :, 1:],                        #body joints local bone rotations from external pose estimator
+        hmr_global_orient = body_pose[:, :, 0],                         #body joints global root orient from external pose estimator     
+        betas             = betas,                                      #shape parameters
+        gender            = gender,                                     #subject gender
+        conf              = conf,                                       #confidence score for each external body joint
     )
 
     model_target = BaseModelOutput(

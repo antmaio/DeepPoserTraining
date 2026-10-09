@@ -1,6 +1,9 @@
-model_str = 'hmd-poser-ext-head-centered'
+model_str       = 'hmd-poser-ext-head-centered'     #model name
+
 [model_args]
-# chosen_jts defaults to SEWHKA
+
 # mode3d in ['gt', 'external', None]
-mode3d = 'external'
-# chosen_jts = []
+mode3d          = 'external'                        #'gt' for body joints from AMASS and 'external' for external 3D positions from pose estimator
+
+# chosen_jts defaults to SEWHKA
+# chosen_jts    = []                                #body joints estimated form pose estimation feeding full-body pose estimation model

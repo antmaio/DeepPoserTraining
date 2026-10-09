@@ -12,7 +12,7 @@ batch_size                         = 128                    #size of mini-batch
 win_len                            = 40                     #windows of input motion features
 win_overlap                        = 5                      #windows overlap 
 zero_betas                         = false                  #if true, take mean body shape from dataset
-max_epoch                          = 2                      #training epochs
+max_epoch                          = 400                    #training epochs
 epochs_per_save                    = 1                      #save training and model state every epochs_per_save
 save_dir                           = "./temp"               #saving directory
 

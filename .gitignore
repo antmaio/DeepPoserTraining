@@ -7,6 +7,7 @@ __pycache__/
 /data/support_data/
 /data/J_regressor_coco.npy
 /data/AMASS
+yolo_bad_frames.txt
 
 # --- Dependencies & Libs ---
 human_body_prior/
@@ -16,3 +17,6 @@ body_visualizer/
 # --- Outputs & Temp ---
 /renders/
 /temp/
+
+# --- Extensions ---
+*.pt
